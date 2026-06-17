@@ -1,0 +1,30 @@
+apiVersion: uds.dev/v1alpha1
+kind: Package
+metadata:
+    name: greenbone-community-edition
+    namespace: greenbone-community-edition
+spec:
+    network:
+        serviceMesh:
+            mode: ambient
+        expose:
+            - gateway: tenant
+              host: nginx
+              podLabels:
+                app.kubernetes.io/name: nginx
+              port: 443
+              selector:
+                app.kubernetes.io/name: nginx
+              service: nginx
+        allow:
+            - direction: Ingress
+              remoteGenerated: IntraNamespace
+            - direction: Egress
+              remoteGenerated: IntraNamespace
+    sso:
+        - clientId: greenbone-community-edition
+          enableAuthserviceSelector:
+            app.kubernetes.io/name: nginx
+          name: Greenbone Community Edition
+          redirectUris:
+            - https://nginx.uds.dev/*

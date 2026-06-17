@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: nginx
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: nginx
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: nginx
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: nginx
+        spec:
+            containers:
+                - name: nginx
+                  image: registry.community.greenbone.net/community/nginx:latest
+                  imagePullPolicy: IfNotPresent
+                  ports:
+                    - name: http
+                      containerPort: 443
+                      protocol: TCP
+                    - name: port-9392-tcp
+                      containerPort: 9392
+                      protocol: TCP
+                    - name: port-80-tcp
+                      containerPort: 80
+                      protocol: TCP
+                  volumeMounts:
+                    - name: volume-nginx-config-vol
+                      mountPath: /etc/nginx/conf.d
+                      readOnly: true
+                    - name: volume-nginx-certificates-vol
+                      mountPath: /etc/nginx/certs
+                      readOnly: true
+                    - name: volume-gsa-data-vol
+                      mountPath: /usr/share/nginx/html
+                      readOnly: true
+            volumes:
+                - name: volume-nginx-config-vol
+                  persistentVolumeClaim:
+                    claimName: nginx-config-vol
+                - name: volume-nginx-certificates-vol
+                  persistentVolumeClaim:
+                    claimName: nginx-certificates-vol
+                - name: volume-gsa-data-vol
+                  persistentVolumeClaim:
+                    claimName: gsa-data-vol

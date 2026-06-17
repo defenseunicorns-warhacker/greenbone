@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: configure-openvas
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: configure-openvas
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: configure-openvas
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: configure-openvas
+        spec:
+            containers:
+                - name: configure-openvas
+                  image: registry.community.greenbone.net/community/openvas-scanner:stable
+                  imagePullPolicy: IfNotPresent
+                  args:
+                    - /bin/sh
+                    - -c
+                    - |
+                      printf "table_driven_lsc = yes\nopenvasd_server = http://openvasd:80\n" > /mnt/openvas.conf
+                      sed "s/127/128/" /etc/openvas/openvas_log.conf | sed 's/gvm/openvas/' > /mnt/openvas_log.conf
+                      chmod 644 /mnt/openvas.conf
+                      chmod 644 /mnt/openvas_log.conf
+                      touch /var/log/openvas/openvas.log
+                      chmod 666 /var/log/openvas/openvas.log
+                  volumeMounts:
+                    - name: volume-openvas-data-vol
+                      mountPath: /mnt
+                    - name: volume-openvas-log-data-vol
+                      mountPath: /var/log/openvas
+            volumes:
+                - name: volume-openvas-data-vol
+                  persistentVolumeClaim:
+                    claimName: openvas-data-vol
+                - name: volume-openvas-log-data-vol
+                  persistentVolumeClaim:
+                    claimName: openvas-log-data-vol

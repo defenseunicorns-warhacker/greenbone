@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: openvas
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: openvas
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: openvas
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: openvas
+        spec:
+            containers:
+                - name: openvas
+                  image: registry.community.greenbone.net/community/openvas-scanner:stable
+                  imagePullPolicy: IfNotPresent
+                  args:
+                    - /bin/sh
+                    - -c
+                    - |
+                      cat /etc/openvas/openvas.conf
+                      tail -f /var/log/openvas/openvas.log
+                  volumeMounts:
+                    - name: volume-openvas-data-vol
+                      mountPath: /etc/openvas
+                    - name: volume-openvas-log-data-vol
+                      mountPath: /var/log/openvas
+            volumes:
+                - name: volume-openvas-data-vol
+                  persistentVolumeClaim:
+                    claimName: openvas-data-vol
+                - name: volume-openvas-log-data-vol
+                  persistentVolumeClaim:
+                    claimName: openvas-log-data-vol

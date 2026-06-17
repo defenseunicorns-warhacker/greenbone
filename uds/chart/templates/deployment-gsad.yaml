@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: gsad
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: gsad
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: gsad
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: gsad
+        spec:
+            containers:
+                - name: gsad
+                  image: registry.community.greenbone.net/community/gsad:stable
+                  imagePullPolicy: IfNotPresent
+                  env:
+                    - name: GSAD_API_ONLY
+                      value: "true"
+                    - name: GSAD_FOREGROUND
+                      value: "true"
+                    - name: GSAD_HTTP_ONLY
+                      value: "true"
+                  volumeMounts:
+                    - name: volume-gvmd-socket-vol
+                      mountPath: /run/gvmd
+            volumes:
+                - name: volume-gvmd-socket-vol
+                  persistentVolumeClaim:
+                    claimName: gvmd-socket-vol

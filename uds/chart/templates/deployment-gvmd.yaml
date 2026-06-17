@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: gvmd
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: gvmd
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: gvmd
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: gvmd
+        spec:
+            containers:
+                - name: gvmd
+                  image: registry.community.greenbone.net/community/gvmd:stable
+                  imagePullPolicy: IfNotPresent
+                  volumeMounts:
+                    - name: volume-gvmd-data-vol
+                      mountPath: /var/lib/gvm
+                    - name: volume-scap-data-vol
+                      mountPath: /var/lib/gvm/scap-data
+                    - name: volume-cert-data-vol
+                      mountPath: /var/lib/gvm/cert-data
+                    - name: volume-data-objects-vol
+                      mountPath: /var/lib/gvm/data-objects/gvmd
+                    - name: volume-vt-data-vol
+                      mountPath: /var/lib/openvas/plugins
+                    - name: volume-psql-data-vol
+                      mountPath: /var/lib/postgresql
+                    - name: volume-gvmd-socket-vol
+                      mountPath: /run/gvmd
+                    - name: volume-ospd-openvas-socket-vol
+                      mountPath: /run/ospd
+                    - name: volume-psql-socket-vol
+                      mountPath: /var/run/postgresql
+            volumes:
+                - name: volume-gvmd-data-vol
+                  persistentVolumeClaim:
+                    claimName: gvmd-data-vol
+                - name: volume-scap-data-vol
+                  persistentVolumeClaim:
+                    claimName: scap-data-vol
+                - name: volume-cert-data-vol
+                  persistentVolumeClaim:
+                    claimName: cert-data-vol
+                - name: volume-data-objects-vol
+                  persistentVolumeClaim:
+                    claimName: data-objects-vol
+                - name: volume-vt-data-vol
+                  persistentVolumeClaim:
+                    claimName: vt-data-vol
+                - name: volume-psql-data-vol
+                  persistentVolumeClaim:
+                    claimName: psql-data-vol
+                - name: volume-gvmd-socket-vol
+                  persistentVolumeClaim:
+                    claimName: gvmd-socket-vol
+                - name: volume-ospd-openvas-socket-vol
+                  persistentVolumeClaim:
+                    claimName: ospd-openvas-socket-vol
+                - name: volume-psql-socket-vol
+                  persistentVolumeClaim:
+                    claimName: psql-socket-vol

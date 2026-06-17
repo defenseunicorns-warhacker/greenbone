@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: gpg-data
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: gpg-data
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: gpg-data
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: gpg-data
+        spec:
+            containers:
+                - name: gpg-data
+                  image: registry.community.greenbone.net/community/gpg-data
+                  imagePullPolicy: IfNotPresent
+                  volumeMounts:
+                    - name: volume-gpg-data-vol
+                      mountPath: /mnt
+            volumes:
+                - name: volume-gpg-data-vol
+                  persistentVolumeClaim:
+                    claimName: gpg-data-vol

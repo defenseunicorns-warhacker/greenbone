@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: gsa
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: gsa
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: gsa
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: gsa
+        spec:
+            containers:
+                - name: gsa
+                  image: registry.community.greenbone.net/community/gsa:stable-slim
+                  imagePullPolicy: IfNotPresent
+                  env:
+                    - name: KEEP_ALIVE
+                      value: "1"
+                    - name: MOUNT_PATH
+                      value: /mnt/web
+                  volumeMounts:
+                    - name: volume-gsa-data-vol
+                      mountPath: /mnt/web
+                  livenessProbe:
+                    exec:
+                        command:
+                            - /bin/sh
+                            - -c
+                            - test -e /run/gsa/copying.done
+                    initialDelaySeconds: 5
+            volumes:
+                - name: volume-gsa-data-vol
+                  persistentVolumeClaim:
+                    claimName: gsa-data-vol

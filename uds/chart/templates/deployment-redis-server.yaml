@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: redis-server
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: redis-server
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: redis-server
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: redis-server
+        spec:
+            containers:
+                - name: redis-server
+                  image: registry.community.greenbone.net/community/redis-server
+                  imagePullPolicy: IfNotPresent
+                  ports:
+                    - name: http
+                      containerPort: 6379
+                      protocol: TCP
+                  volumeMounts:
+                    - name: volume-redis-socket-vol
+                      mountPath: /run/redis
+            volumes:
+                - name: volume-redis-socket-vol
+                  persistentVolumeClaim:
+                    claimName: redis-socket-vol

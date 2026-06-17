@@ -1,0 +1,16 @@
+apiVersion: uds.dev/v1alpha1
+kind: Exemption
+metadata:
+    name: greenbone-community-edition
+    namespace: uds-policy-exemptions
+spec:
+    exemptions:
+        - title: Linux capabilities and seccomp policy exemption for greenbone-community-edition ospd-openvas
+          matcher:
+            kind: pod
+            namespace: greenbone-community-edition
+            name: ^ospd-openvas-.*
+          policies:
+            - DropAllCapabilities
+            - RestrictCapabilities
+            - RestrictSeccomp

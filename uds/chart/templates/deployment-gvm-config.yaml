@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: gvm-config
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: gvm-config
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: gvm-config
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: gvm-config
+        spec:
+            containers:
+                - name: gvm-config
+                  image: registry.community.greenbone.net/community/gvm-config:latest
+                  imagePullPolicy: IfNotPresent
+                  env:
+                    - name: ENABLE_NGINX_CONFIG
+                      value: "true"
+                    - name: ENABLE_TLS_GENERATION
+                      value: "true"
+                  volumeMounts:
+                    - name: volume-nginx-config-vol
+                      mountPath: /mnt/nginx/configs
+                    - name: volume-nginx-certificates-vol
+                      mountPath: /mnt/nginx/certs
+            volumes:
+                - name: volume-nginx-config-vol
+                  persistentVolumeClaim:
+                    claimName: nginx-config-vol
+                - name: volume-nginx-certificates-vol
+                  persistentVolumeClaim:
+                    claimName: nginx-certificates-vol

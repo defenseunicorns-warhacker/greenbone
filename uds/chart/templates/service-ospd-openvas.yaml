@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+    name: ospd-openvas
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: ospd-openvas
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    clusterIP: None
+    selector:
+        app.kubernetes.io/name: ospd-openvas

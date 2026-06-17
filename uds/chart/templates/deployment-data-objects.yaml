@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: data-objects
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: data-objects
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: data-objects
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: data-objects
+        spec:
+            containers:
+                - name: data-objects
+                  image: registry.community.greenbone.net/community/data-objects
+                  imagePullPolicy: IfNotPresent
+                  env:
+                    - name: FEED_RELEASE
+                      value: "24.10"
+                    - name: KEEP_ALIVE
+                      value: "1"
+                  volumeMounts:
+                    - name: volume-data-objects-vol
+                      mountPath: /mnt
+            volumes:
+                - name: volume-data-objects-vol
+                  persistentVolumeClaim:
+                    claimName: data-objects-vol

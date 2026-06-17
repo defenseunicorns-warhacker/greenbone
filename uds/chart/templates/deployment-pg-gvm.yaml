@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: pg-gvm
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: pg-gvm
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: pg-gvm
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: pg-gvm
+        spec:
+            containers:
+                - name: pg-gvm
+                  image: registry.community.greenbone.net/community/pg-gvm:stable
+                  imagePullPolicy: IfNotPresent
+                  volumeMounts:
+                    - name: volume-psql-data-vol
+                      mountPath: /var/lib/postgresql
+                    - name: volume-psql-socket-vol
+                      mountPath: /var/run/postgresql
+            volumes:
+                - name: volume-psql-data-vol
+                  persistentVolumeClaim:
+                    claimName: psql-data-vol
+                - name: volume-psql-socket-vol
+                  persistentVolumeClaim:
+                    claimName: psql-socket-vol

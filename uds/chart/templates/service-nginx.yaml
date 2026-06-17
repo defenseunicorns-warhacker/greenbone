@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Service
+metadata:
+    name: nginx
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: nginx
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    selector:
+        app.kubernetes.io/name: nginx
+    ports:
+        - name: http
+          port: 443
+          targetPort: 443
+          protocol: TCP
+        - name: port-9392-tcp
+          port: 9392
+          targetPort: 9392
+          protocol: TCP
+        - name: port-80-tcp
+          port: 80
+          targetPort: 80
+          protocol: TCP

@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: scap-data
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: scap-data
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: scap-data
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: scap-data
+        spec:
+            containers:
+                - name: scap-data
+                  image: registry.community.greenbone.net/community/scap-data
+                  imagePullPolicy: IfNotPresent
+                  env:
+                    - name: KEEP_ALIVE
+                      value: "1"
+                  volumeMounts:
+                    - name: volume-scap-data-vol
+                      mountPath: /mnt
+            volumes:
+                - name: volume-scap-data-vol
+                  persistentVolumeClaim:
+                    claimName: scap-data-vol

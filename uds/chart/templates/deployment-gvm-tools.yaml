@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: gvm-tools
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: gvm-tools
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: gvm-tools
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: gvm-tools
+        spec:
+            containers:
+                - name: gvm-tools
+                  image: registry.community.greenbone.net/community/gvm-tools
+                  imagePullPolicy: IfNotPresent
+                  volumeMounts:
+                    - name: volume-gvmd-socket-vol
+                      mountPath: /run/gvmd
+                    - name: volume-ospd-openvas-socket-vol
+                      mountPath: /run/ospd
+            volumes:
+                - name: volume-gvmd-socket-vol
+                  persistentVolumeClaim:
+                    claimName: gvmd-socket-vol
+                - name: volume-ospd-openvas-socket-vol
+                  persistentVolumeClaim:
+                    claimName: ospd-openvas-socket-vol

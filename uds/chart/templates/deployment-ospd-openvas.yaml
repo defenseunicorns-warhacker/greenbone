@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: ospd-openvas
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: ospd-openvas
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: ospd-openvas
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: ospd-openvas
+        spec:
+            initContainers:
+                - name: wait-redis-server
+                  image: busybox:1.36
+                  imagePullPolicy: IfNotPresent
+                  command:
+                    - sh
+                    - -c
+                    - until nc -z redis-server 6379; do echo waiting for redis-server:6379; sleep 2; done
+            containers:
+                - name: ospd-openvas
+                  image: registry.community.greenbone.net/community/ospd-openvas:stable
+                  imagePullPolicy: IfNotPresent
+                  args:
+                    - ospd-openvas
+                    - -f
+                    - --config
+                    - /etc/gvm/ospd-openvas.conf
+                    - --notus-feed-dir
+                    - /var/lib/notus/advisories
+                    - -m
+                    - "666"
+                  volumeMounts:
+                    - name: volume-gpg-data-vol
+                      mountPath: /etc/openvas/gnupg
+                    - name: volume-vt-data-vol
+                      mountPath: /var/lib/openvas/plugins
+                    - name: volume-notus-data-vol
+                      mountPath: /var/lib/notus
+                    - name: volume-ospd-openvas-socket-vol
+                      mountPath: /run/ospd
+                    - name: volume-redis-socket-vol
+                      mountPath: /run/redis
+                    - name: volume-openvas-data-vol
+                      mountPath: /etc/openvas
+                    - name: volume-openvas-log-data-vol
+                      mountPath: /var/log/openvas
+                  securityContext:
+                    capabilities:
+                        add:
+                            - NET_ADMIN
+                            - NET_RAW
+            volumes:
+                - name: volume-gpg-data-vol
+                  persistentVolumeClaim:
+                    claimName: gpg-data-vol
+                - name: volume-vt-data-vol
+                  persistentVolumeClaim:
+                    claimName: vt-data-vol
+                - name: volume-notus-data-vol
+                  persistentVolumeClaim:
+                    claimName: notus-data-vol
+                - name: volume-ospd-openvas-socket-vol
+                  persistentVolumeClaim:
+                    claimName: ospd-openvas-socket-vol
+                - name: volume-redis-socket-vol
+                  persistentVolumeClaim:
+                    claimName: redis-socket-vol
+                - name: volume-openvas-data-vol
+                  persistentVolumeClaim:
+                    claimName: openvas-data-vol
+                - name: volume-openvas-log-data-vol
+                  persistentVolumeClaim:
+                    claimName: openvas-log-data-vol

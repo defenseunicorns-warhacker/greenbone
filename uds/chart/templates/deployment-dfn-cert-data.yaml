@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: dfn-cert-data
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: dfn-cert-data
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: dfn-cert-data
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: dfn-cert-data
+        spec:
+            containers:
+                - name: dfn-cert-data
+                  image: registry.community.greenbone.net/community/dfn-cert-data
+                  imagePullPolicy: IfNotPresent
+                  env:
+                    - name: KEEP_ALIVE
+                      value: "1"
+                  volumeMounts:
+                    - name: volume-cert-data-vol
+                      mountPath: /mnt
+            volumes:
+                - name: volume-cert-data-vol
+                  persistentVolumeClaim:
+                    claimName: cert-data-vol

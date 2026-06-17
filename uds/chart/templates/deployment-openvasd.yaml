@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: openvasd
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: openvasd
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: openvasd
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: openvasd
+        spec:
+            containers:
+                - name: openvasd
+                  image: registry.community.greenbone.net/community/openvas-scanner:stable
+                  imagePullPolicy: IfNotPresent
+                  env:
+                    - name: GNUPGHOME
+                      value: /etc/openvas/gnupg
+                    - name: LISTENING
+                      value: 0.0.0.0:80
+                    - name: OPENVASD_MODE
+                      value: service_notus
+                  volumeMounts:
+                    - name: volume-openvas-data-vol
+                      mountPath: /etc/openvas
+                    - name: volume-openvas-log-data-vol
+                      mountPath: /var/log/openvas
+                    - name: volume-gpg-data-vol
+                      mountPath: /etc/openvas/gnupg
+                    - name: volume-notus-data-vol
+                      mountPath: /var/lib/notus
+            volumes:
+                - name: volume-openvas-data-vol
+                  persistentVolumeClaim:
+                    claimName: openvas-data-vol
+                - name: volume-openvas-log-data-vol
+                  persistentVolumeClaim:
+                    claimName: openvas-log-data-vol
+                - name: volume-gpg-data-vol
+                  persistentVolumeClaim:
+                    claimName: gpg-data-vol
+                - name: volume-notus-data-vol
+                  persistentVolumeClaim:
+                    claimName: notus-data-vol

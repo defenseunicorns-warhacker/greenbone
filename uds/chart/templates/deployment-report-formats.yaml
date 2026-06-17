@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: report-formats
+    namespace: greenbone-community-edition
+    labels:
+        app.kubernetes.io/name: report-formats
+        app.kubernetes.io/part-of: greenbone-community-edition
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: report-formats
+    template:
+        metadata:
+            name: ""
+            labels:
+                app.kubernetes.io/name: report-formats
+        spec:
+            containers:
+                - name: report-formats
+                  image: registry.community.greenbone.net/community/report-formats
+                  imagePullPolicy: IfNotPresent
+                  env:
+                    - name: FEED_RELEASE
+                      value: "24.10"
+                    - name: KEEP_ALIVE
+                      value: "1"
+                  volumeMounts:
+                    - name: volume-data-objects-vol
+                      mountPath: /mnt
+            volumes:
+                - name: volume-data-objects-vol
+                  persistentVolumeClaim:
+                    claimName: data-objects-vol

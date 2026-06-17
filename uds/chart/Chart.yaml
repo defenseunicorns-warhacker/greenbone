@@ -1,0 +1,6 @@
+apiVersion: v2
+name: greenbone-community-edition
+description: UDS package generated from Docker Compose for greenbone-community-edition
+type: application
+version: 0.1.0
+appVersion: 0.1.0
