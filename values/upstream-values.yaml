@@ -1,0 +1,52 @@
+imageRegistry: registry.community.greenbone.net/community
+feedRelease: "24.10"
+
+images:
+  vulnerabilityTests:
+    repository: vulnerability-tests
+    tag: latest
+  notusData:
+    repository: notus-data
+    tag: latest
+  scapData:
+    repository: scap-data
+    tag: latest
+  certBundData:
+    repository: cert-bund-data
+    tag: latest
+  dfnCertData:
+    repository: dfn-cert-data
+    tag: latest
+  dataObjects:
+    repository: data-objects
+    tag: latest
+  reportFormats:
+    repository: report-formats
+    tag: latest
+  gpgData:
+    repository: gpg-data
+    tag: latest
+  redisServer:
+    repository: redis-server
+    tag: latest
+  pgGvm:
+    repository: pg-gvm
+    tag: stable
+  pgGvmMigrator:
+    repository: pg-gvm-migrator
+    tag: stable
+  gvmd:
+    repository: gvmd
+    tag: stable
+  gsa:
+    repository: gsa
+    tag: stable-slim
+  gsad:
+    repository: gsad
+    tag: stable
+  openvasScanner:
+    repository: openvas-scanner
+    tag: stable
+  ospdOpenvas:
+    repository: ospd-openvas
+    tag: stable

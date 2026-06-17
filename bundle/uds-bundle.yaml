@@ -1,0 +1,11 @@
+kind: UDSBundle
+metadata:
+  name: greenbone-community
+  description: Greenbone Community Edition test bundle
+  version: dev
+
+packages:
+  - name: greenbone-community
+    path: ../
+    ref: dev
+    # ref: 24.10-uds.0

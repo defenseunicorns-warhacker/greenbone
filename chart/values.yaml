@@ -1,0 +1,17 @@
+package:
+  name: greenbone-community
+  namespace: greenbone
+
+network:
+  expose:
+    host: greenbone
+    gateway: tenant
+    service: greenbone-community
+    port: 9392
+    targetPort: 9392
+  allowScannerEgress: false
+
+exemptions:
+  enabled: true
+  namespace: uds-policy-exemptions
+  podName: greenbone-community-0

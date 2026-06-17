@@ -1,0 +1,35 @@
+{{- if .Values.exemptions.enabled }}
+apiVersion: uds.dev/v1alpha1
+kind: Exemption
+metadata:
+  name: greenbone-community-scanner
+  namespace: {{ .Values.exemptions.namespace }}
+spec:
+  exemptions:
+    - title: Greenbone OpenVAS Scanner Capabilities
+      description: >-
+        The upstream Greenbone ospd-openvas scanner requires NET_ADMIN and NET_RAW
+        capabilities for packet capture, raw sockets, and host discovery, and it
+        runs with an unconfined seccomp profile in the official container stack.
+      matcher:
+        namespace: {{ .Values.package.namespace }}
+        name: {{ .Values.exemptions.podName }}
+        kind: pod
+      policies:
+        - DropAllCapabilities
+        - RestrictCapabilities
+        - RestrictSeccomp
+    - title: Greenbone Runs As Root
+      description: >-
+        The upstream Greenbone container stack is built to run as root. The feed and
+        data images chmod/touch root-owned paths during seeding, PostgreSQL (pg-gvm)
+        starts as root and drops to the postgres user while requiring a 0700 data
+        directory, and openvasd binds port 80. These match the official container stack
+        and cannot meet the non-root baseline.
+      matcher:
+        namespace: {{ .Values.package.namespace }}
+        name: {{ .Values.exemptions.podName }}
+        kind: pod
+      policies:
+        - RequireNonRootUser
+{{- end }}
