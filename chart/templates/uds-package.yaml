@@ -1,0 +1,29 @@
+apiVersion: uds.dev/v1alpha1
+kind: Package
+metadata:
+  name: {{ .Values.package.name }}
+  namespace: {{ .Values.package.namespace }}
+spec:
+  network:
+    serviceMesh:
+      mode: ambient
+    expose:
+      - description: Greenbone Security Assistant
+        service: {{ .Values.network.expose.service }}
+        selector:
+          app.kubernetes.io/name: greenbone
+          app.kubernetes.io/instance: greenbone-community
+        gateway: {{ .Values.network.expose.gateway }}
+        host: {{ .Values.network.expose.host }}
+        port: {{ .Values.network.expose.port }}
+        targetPort: {{ .Values.network.expose.targetPort }}
+    allow:
+      - direction: Ingress
+        remoteGenerated: IntraNamespace
+      - direction: Egress
+        remoteGenerated: IntraNamespace
+      {{- if .Values.network.allowScannerEgress }}
+      - direction: Egress
+        remoteGenerated: Anywhere
+        description: Allow Greenbone scanner traffic to configured scan targets
+      {{- end }}

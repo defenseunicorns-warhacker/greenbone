@@ -1,0 +1,124 @@
+replicaCount: 1
+
+imageRegistry: registry.community.greenbone.net/community
+feedRelease: "24.10"
+
+images:
+  vulnerabilityTests:
+    repository: vulnerability-tests
+    tag: latest
+  notusData:
+    repository: notus-data
+    tag: latest
+  scapData:
+    repository: scap-data
+    tag: latest
+  certBundData:
+    repository: cert-bund-data
+    tag: latest
+  dfnCertData:
+    repository: dfn-cert-data
+    tag: latest
+  dataObjects:
+    repository: data-objects
+    tag: latest
+  reportFormats:
+    repository: report-formats
+    tag: latest
+  gpgData:
+    repository: gpg-data
+    tag: latest
+  redisServer:
+    repository: redis-server
+    tag: latest
+  pgGvm:
+    repository: pg-gvm
+    tag: stable
+  pgGvmMigrator:
+    repository: pg-gvm-migrator
+    tag: stable
+  gvmd:
+    repository: gvmd
+    tag: stable
+  gsa:
+    repository: gsa
+    tag: stable-slim
+  gsad:
+    repository: gsad
+    tag: stable
+  openvasScanner:
+    repository: openvas-scanner
+    tag: stable
+  ospdOpenvas:
+    repository: ospd-openvas
+    tag: stable
+
+service:
+  type: ClusterIP
+  ports:
+    gsa: 9392
+
+persistence:
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  storageClass: ""
+  volumes:
+    gpgData:
+      size: 100Mi
+    scapData:
+      size: 2Gi
+    certData:
+      size: 500Mi
+    dataObjects:
+      size: 500Mi
+    gvmdData:
+      size: 1Gi
+    psqlData:
+      size: 5Gi
+    vtData:
+      size: 2Gi
+    notusData:
+      size: 1Gi
+    openvasData:
+      size: 100Mi
+    openvasLogData:
+      size: 500Mi
+    gsaData:
+      size: 200Mi
+
+resources:
+  gvmd:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      memory: 4Gi
+  ospdOpenvas:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      memory: 4Gi
+  openvasd:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  postgres:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  redis:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

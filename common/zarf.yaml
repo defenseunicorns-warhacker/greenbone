@@ -1,0 +1,19 @@
+kind: ZarfPackageConfig
+components:
+  - name: greenbone-community
+    required: true
+    description: Deploy Greenbone Community Edition and UDS integration resources
+    charts:
+      - name: greenbone-community-config
+        releaseName: greenbone-community-config
+        localPath: ../chart
+        version: 0.1.0
+        namespace: greenbone
+      - name: greenbone
+        releaseName: greenbone-community
+        localPath: ../charts/greenbone
+        version: 0.1.0
+        namespace: greenbone
+        valuesFiles:
+          - ../values/common-values.yaml
+          - ../values/upstream-values.yaml

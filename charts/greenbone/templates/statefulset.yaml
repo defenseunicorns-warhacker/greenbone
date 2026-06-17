@@ -1,0 +1,378 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "greenbone.fullname" . }}
+  labels:
+    {{- include "greenbone.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  serviceName: {{ include "greenbone.fullname" . }}-headless
+  selector:
+    matchLabels:
+      {{- include "greenbone.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "greenbone.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: greenbone
+      annotations:
+        container.apparmor.security.beta.kubernetes.io/ospd-openvas: unconfined
+    spec:
+      serviceAccountName: {{ include "greenbone.fullname" . }}
+      # The upstream Greenbone container stack is built to run as root: the feed/data
+      # images chmod/touch root-owned paths, PostgreSQL starts as root and drops to the
+      # postgres user (and requires its data dir to be 0700 with no group access, so no
+      # fsGroup), and openvasd binds :80. Running as root here matches the upstream
+      # design; the non-root policy is waived via the UDS Exemption.
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
+      # Collapsed into a single pod, the few cross-container TCP links by service name
+      # don't resolve via DNS. ospd-openvas reaches the notus service at
+      # http://openvasd:80, so map that name to the shared pod loopback. All other links
+      # (gvmd, gsad, postgres, redis, ospd) go through mounted-emptyDir sockets.
+      hostAliases:
+        - ip: "127.0.0.1"
+          hostnames:
+            - openvasd
+      initContainers:
+        - name: gpg-data
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.gpgData.repository }}:{{ .Values.images.gpgData.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              for f in /var/lib/greenbone/gpg/*; do
+                [ -S "$f" ] && continue
+                cp -a "$f" /mnt/ 2>/dev/null || true
+              done
+          volumeMounts:
+            - name: gpg-data
+              mountPath: /mnt
+        - name: vulnerability-tests
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.vulnerabilityTests.repository }}:{{ .Values.images.vulnerabilityTests.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            {{- include "greenbone.seedCommand" (dict "src" "/var/lib/openvas/${FEED_RELEASE}/vt-data/nasl") | nindent 12 }}
+          env:
+            - name: FEED_RELEASE
+              value: {{ .Values.feedRelease | quote }}
+          volumeMounts:
+            - name: vt-data
+              mountPath: /mnt
+        - name: notus-data
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.notusData.repository }}:{{ .Values.images.notusData.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            {{- include "greenbone.seedCommand" (dict "src" "/var/lib/notus") | nindent 12 }}
+          volumeMounts:
+            - name: notus-data
+              mountPath: /mnt
+        - name: scap-data
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.scapData.repository }}:{{ .Values.images.scapData.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            {{- include "greenbone.seedCommand" (dict "src" "/var/lib/gvm/scap-data") | nindent 12 }}
+          volumeMounts:
+            - name: scap-data
+              mountPath: /mnt
+        - name: cert-bund-data
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.certBundData.repository }}:{{ .Values.images.certBundData.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            {{- include "greenbone.seedCommand" (dict "src" "/var/lib/gvm/cert-data") | nindent 12 }}
+          volumeMounts:
+            - name: cert-data
+              mountPath: /mnt
+        - name: dfn-cert-data
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.dfnCertData.repository }}:{{ .Values.images.dfnCertData.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            {{- include "greenbone.seedCommand" (dict "src" "/var/lib/gvm/cert-data") | nindent 12 }}
+          volumeMounts:
+            - name: cert-data
+              mountPath: /mnt
+        - name: data-objects
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.dataObjects.repository }}:{{ .Values.images.dataObjects.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            {{- include "greenbone.seedCommand" (dict "src" "/var/lib/gvm/data-objects/gvmd") | nindent 12 }}
+          env:
+            - name: FEED_RELEASE
+              value: {{ .Values.feedRelease | quote }}
+          volumeMounts:
+            - name: data-objects
+              mountPath: /mnt
+        - name: report-formats
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.reportFormats.repository }}:{{ .Values.images.reportFormats.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            {{- include "greenbone.seedCommand" (dict "src" "/var/lib/gvm/data-objects/gvmd") | nindent 12 }}
+          env:
+            - name: FEED_RELEASE
+              value: {{ .Values.feedRelease | quote }}
+          volumeMounts:
+            - name: data-objects
+              mountPath: /mnt
+        - name: gsa
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.gsa.repository }}:{{ .Values.images.gsa.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            {{- include "greenbone.seedCommand" (dict "src" "/usr/local/share/gvm/gsad/web" "dst" "/mnt/web") | nindent 12 }}
+          volumeMounts:
+            - name: gsa-data
+              mountPath: /mnt/web
+        # gvmd expects its working dir /var/lib/gvm/gvmd to exist (for its lock file). The
+        # image ships it, but the empty gvmd-data PVC mounts over /var/lib/gvm and hides
+        # it -- same PVC-shadowing issue as postgres. Seed it from the image on first run.
+        - name: gvmd-data-init
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.gvmd.repository }}:{{ .Values.images.gvmd.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              if [ -d /mnt/gvmd ]; then
+                echo "gvmd data already present on volume; skipping seed"
+              else
+                echo "seeding gvmd data dirs from image into empty volume"
+                cp -a /var/lib/gvm/. /mnt/
+              fi
+          volumeMounts:
+            - name: gvmd-data
+              mountPath: /mnt
+        # The postgres image ships a pre-created cluster at /var/lib/postgresql/<ver>/main,
+        # and start-postgresql has no initdb path -- it requires that cluster to exist.
+        # Docker named volumes copy image content on first mount, but Kubernetes PVCs do
+        # not, so our empty psql-data PVC would shadow the cluster and postgres exits 1.
+        # Seed the PVC from the image's cluster on first run; skip if already initialized
+        # so existing data survives restarts/redeploys.
+        - name: pg-cluster-init
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.pgGvm.repository }}:{{ .Values.images.pgGvm.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              if ls /mnt/*/main/PG_VERSION >/dev/null 2>&1; then
+                echo "postgres cluster already present on volume; skipping seed"
+              else
+                echo "seeding postgres cluster from image into empty volume"
+                cp -a /var/lib/postgresql/. /mnt/
+              fi
+          volumeMounts:
+            - name: psql-data
+              mountPath: /mnt
+        - name: pg-gvm-migrator
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.pgGvmMigrator.repository }}:{{ .Values.images.pgGvmMigrator.tag }}
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: psql-data
+              mountPath: /var/lib/postgresql
+            - name: psql-socket
+              mountPath: /var/run/postgresql
+        - name: configure-openvas
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.openvasScanner.repository }}:{{ .Values.images.openvasScanner.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              printf "table_driven_lsc = yes\nopenvasd_server = http://openvasd:80\n" > /mnt/openvas.conf
+              sed "s/127/128/" /etc/openvas/openvas_log.conf | sed 's/gvm/openvas/' > /mnt/openvas_log.conf
+              chmod 644 /mnt/openvas.conf
+              chmod 644 /mnt/openvas_log.conf
+              touch /var/log/openvas/openvas.log
+              chmod 666 /var/log/openvas/openvas.log
+          volumeMounts:
+            - name: openvas-data
+              mountPath: /mnt
+            - name: openvas-log-data
+              mountPath: /var/log/openvas
+      containers:
+        - name: redis-server
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.redisServer.repository }}:{{ .Values.images.redisServer.tag }}
+          imagePullPolicy: IfNotPresent
+          resources:
+            {{- toYaml .Values.resources.redis | nindent 12 }}
+          volumeMounts:
+            - name: redis-socket
+              mountPath: /run/redis
+        - name: pg-gvm
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.pgGvm.repository }}:{{ .Values.images.pgGvm.tag }}
+          imagePullPolicy: IfNotPresent
+          resources:
+            {{- toYaml .Values.resources.postgres | nindent 12 }}
+          volumeMounts:
+            - name: psql-data
+              mountPath: /var/lib/postgresql
+            - name: psql-socket
+              mountPath: /var/run/postgresql
+        - name: gvmd
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.gvmd.repository }}:{{ .Values.images.gvmd.tag }}
+          imagePullPolicy: IfNotPresent
+          resources:
+            {{- toYaml .Values.resources.gvmd | nindent 12 }}
+          volumeMounts:
+            - name: gvmd-data
+              mountPath: /var/lib/gvm
+            - name: scap-data
+              mountPath: /var/lib/gvm/scap-data
+            - name: cert-data
+              mountPath: /var/lib/gvm/cert-data
+            - name: data-objects
+              mountPath: /var/lib/gvm/data-objects/gvmd
+            - name: vt-data
+              mountPath: /var/lib/openvas/plugins
+            - name: psql-data
+              mountPath: /var/lib/postgresql
+            - name: gvmd-socket
+              mountPath: /run/gvmd
+            - name: ospd-openvas-socket
+              mountPath: /run/ospd
+            - name: psql-socket
+              mountPath: /var/run/postgresql
+        - name: gsad
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.gsad.repository }}:{{ .Values.images.gsad.tag }}
+          imagePullPolicy: IfNotPresent
+          # gsad serves the GSA web UI directly on 9392. UDS Core (Istio) terminates TLS
+          # and handles ingress, so the upstream nginx TLS/static proxy is unnecessary --
+          # GSAD_API_ONLY is omitted so gsad serves the static content itself from
+          # --static-content (/usr/local/share/gvm/gsad/web), populated from the gsa image
+          # by the gsa init container into the gsa-data volume.
+          env:
+            - name: GSAD_HTTP_ONLY
+              value: "true"
+            - name: GSAD_FOREGROUND
+              value: "true"
+          ports:
+            - name: gsa
+              containerPort: 9392
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: gsa
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: gsa
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          volumeMounts:
+            - name: gvmd-socket
+              mountPath: /run/gvmd
+            - name: gsa-data
+              mountPath: /usr/local/share/gvm/gsad/web
+              readOnly: true
+        - name: openvas
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.openvasScanner.repository }}:{{ .Values.images.openvasScanner.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              cat /etc/openvas/openvas.conf
+              tail -f /var/log/openvas/openvas.log
+          volumeMounts:
+            - name: openvas-data
+              mountPath: /etc/openvas
+            - name: openvas-log-data
+              mountPath: /var/log/openvas
+        - name: openvasd
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.openvasScanner.repository }}:{{ .Values.images.openvasScanner.tag }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: OPENVASD_MODE
+              value: service_notus
+            - name: GNUPGHOME
+              value: /etc/openvas/gnupg
+            - name: LISTENING
+              value: 0.0.0.0:80
+          resources:
+            {{- toYaml .Values.resources.openvasd | nindent 12 }}
+          volumeMounts:
+            - name: openvas-data
+              mountPath: /etc/openvas
+            - name: openvas-log-data
+              mountPath: /var/log/openvas
+            - name: gpg-data
+              mountPath: /etc/openvas/gnupg
+            - name: notus-data
+              mountPath: /var/lib/notus
+        - name: ospd-openvas
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.ospdOpenvas.repository }}:{{ .Values.images.ospdOpenvas.tag }}
+          imagePullPolicy: IfNotPresent
+          hostname: ospd-openvas.local
+          command:
+            - ospd-openvas
+            - -f
+            - --config
+            - /etc/gvm/ospd-openvas.conf
+            - --notus-feed-dir
+            - /var/lib/notus/advisories
+            - -m
+            - "666"
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+            seccompProfile:
+              type: Unconfined
+          resources:
+            {{- toYaml .Values.resources.ospdOpenvas | nindent 12 }}
+          volumeMounts:
+            - name: gpg-data
+              mountPath: /etc/openvas/gnupg
+            - name: vt-data
+              mountPath: /var/lib/openvas/plugins
+            - name: notus-data
+              mountPath: /var/lib/notus
+            - name: ospd-openvas-socket
+              mountPath: /run/ospd
+            - name: redis-socket
+              mountPath: /run/redis
+            - name: openvas-data
+              mountPath: /etc/openvas
+            - name: openvas-log-data
+              mountPath: /var/log/openvas
+      volumes:
+        - name: psql-socket
+          emptyDir: {}
+        - name: gvmd-socket
+          emptyDir: {}
+        - name: ospd-openvas-socket
+          emptyDir: {}
+        - name: redis-socket
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  volumeClaimTemplates:
+    {{- $root := . -}}
+    {{- range $name, $cfg := .Values.persistence.volumes }}
+    - metadata:
+        name: {{ kebabcase $name }}
+      spec:
+        accessModes:
+          {{- toYaml $root.Values.persistence.accessModes | nindent 10 }}
+        resources:
+          requests:
+            storage: {{ default $root.Values.persistence.size $cfg.size }}
+        {{- if $root.Values.persistence.storageClass }}
+        storageClassName: {{ $root.Values.persistence.storageClass | quote }}
+        {{- end }}
+    {{- end }}

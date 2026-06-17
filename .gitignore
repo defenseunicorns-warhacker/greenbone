@@ -1,0 +1,5 @@
+.zarf-cache/
+zarf-package-*.tar.zst
+bundle/*.tar.zst
+
+.claude
