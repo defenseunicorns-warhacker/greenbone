@@ -50,12 +50,22 @@ spec:
           volumeMounts:
             - name: gpg-data
               mountPath: /mnt
+        # Each feed/data image ships its own entrypoint (/bin/init.sh, or gsa's
+        # setup-gsa) that copies its bundled data into MOUNT_PATH -- extracting the
+        # notus/scap tarballs, stripping the FEED_RELEASE version dir for vt and
+        # data-objects, and applying per-image merge/cleanup rules on the shared
+        # cert-data and data-objects volumes. We run those entrypoints unmodified
+        # (PVC mounted at MOUNT_PATH, KEEP_ALIVE unset so each exits after seeding)
+        # rather than a hand-rolled copy, so an upstream feed-layout change can't
+        # silently leave a volume half-seeded. Order matters: cert-bund before
+        # dfn-cert, and data-objects before report-formats, because the second of
+        # each pair merges into the volume the first one populates.
         - name: vulnerability-tests
           image: {{ .Values.imageRegistry }}/{{ .Values.images.vulnerabilityTests.repository }}:{{ .Values.images.vulnerabilityTests.tag }}
           imagePullPolicy: IfNotPresent
-          command:
-            {{- include "greenbone.seedCommand" (dict "src" "/var/lib/openvas/${FEED_RELEASE}/vt-data/nasl") | nindent 12 }}
           env:
+            - name: MOUNT_PATH
+              value: /mnt
             - name: FEED_RELEASE
               value: {{ .Values.feedRelease | quote }}
           volumeMounts:
@@ -64,41 +74,45 @@ spec:
         - name: notus-data
           image: {{ .Values.imageRegistry }}/{{ .Values.images.notusData.repository }}:{{ .Values.images.notusData.tag }}
           imagePullPolicy: IfNotPresent
-          command:
-            {{- include "greenbone.seedCommand" (dict "src" "/var/lib/notus") | nindent 12 }}
+          env:
+            - name: MOUNT_PATH
+              value: /mnt
           volumeMounts:
             - name: notus-data
               mountPath: /mnt
         - name: scap-data
           image: {{ .Values.imageRegistry }}/{{ .Values.images.scapData.repository }}:{{ .Values.images.scapData.tag }}
           imagePullPolicy: IfNotPresent
-          command:
-            {{- include "greenbone.seedCommand" (dict "src" "/var/lib/gvm/scap-data") | nindent 12 }}
+          env:
+            - name: MOUNT_PATH
+              value: /mnt
           volumeMounts:
             - name: scap-data
               mountPath: /mnt
         - name: cert-bund-data
           image: {{ .Values.imageRegistry }}/{{ .Values.images.certBundData.repository }}:{{ .Values.images.certBundData.tag }}
           imagePullPolicy: IfNotPresent
-          command:
-            {{- include "greenbone.seedCommand" (dict "src" "/var/lib/gvm/cert-data") | nindent 12 }}
+          env:
+            - name: MOUNT_PATH
+              value: /mnt
           volumeMounts:
             - name: cert-data
               mountPath: /mnt
         - name: dfn-cert-data
           image: {{ .Values.imageRegistry }}/{{ .Values.images.dfnCertData.repository }}:{{ .Values.images.dfnCertData.tag }}
           imagePullPolicy: IfNotPresent
-          command:
-            {{- include "greenbone.seedCommand" (dict "src" "/var/lib/gvm/cert-data") | nindent 12 }}
+          env:
+            - name: MOUNT_PATH
+              value: /mnt
           volumeMounts:
             - name: cert-data
               mountPath: /mnt
         - name: data-objects
           image: {{ .Values.imageRegistry }}/{{ .Values.images.dataObjects.repository }}:{{ .Values.images.dataObjects.tag }}
           imagePullPolicy: IfNotPresent
-          command:
-            {{- include "greenbone.seedCommand" (dict "src" "/var/lib/gvm/data-objects/gvmd") | nindent 12 }}
           env:
+            - name: MOUNT_PATH
+              value: /mnt
             - name: FEED_RELEASE
               value: {{ .Values.feedRelease | quote }}
           volumeMounts:
@@ -107,19 +121,23 @@ spec:
         - name: report-formats
           image: {{ .Values.imageRegistry }}/{{ .Values.images.reportFormats.repository }}:{{ .Values.images.reportFormats.tag }}
           imagePullPolicy: IfNotPresent
-          command:
-            {{- include "greenbone.seedCommand" (dict "src" "/var/lib/gvm/data-objects/gvmd") | nindent 12 }}
           env:
+            - name: MOUNT_PATH
+              value: /mnt
             - name: FEED_RELEASE
               value: {{ .Values.feedRelease | quote }}
           volumeMounts:
             - name: data-objects
               mountPath: /mnt
+        # gsa's entrypoint runs setup-gsa (generates config.js, then copies the web
+        # assets to MOUNT_PATH) and exits when MOUNT_PATH is set and KEEP_ALIVE is
+        # not. gsad later serves these assets read-only from the same volume.
         - name: gsa
           image: {{ .Values.imageRegistry }}/{{ .Values.images.gsa.repository }}:{{ .Values.images.gsa.tag }}
           imagePullPolicy: IfNotPresent
-          command:
-            {{- include "greenbone.seedCommand" (dict "src" "/usr/local/share/gvm/gsad/web" "dst" "/mnt/web") | nindent 12 }}
+          env:
+            - name: MOUNT_PATH
+              value: /mnt/web
           volumeMounts:
             - name: gsa-data
               mountPath: /mnt/web
@@ -193,11 +211,20 @@ spec:
             - name: openvas-log-data
               mountPath: /var/log/openvas
       containers:
+        # redis only listens on the /run/redis/redis.sock Unix socket (TCP is disabled
+        # with `port 0`), so readiness is probed through redis-cli over that socket.
         - name: redis-server
           image: {{ .Values.imageRegistry }}/{{ .Values.images.redisServer.repository }}:{{ .Values.images.redisServer.tag }}
           imagePullPolicy: IfNotPresent
           resources:
             {{- toYaml .Values.resources.redis | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "-s", "/run/redis/redis.sock", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
           volumeMounts:
             - name: redis-socket
               mountPath: /run/redis
@@ -206,6 +233,13 @@ spec:
           imagePullPolicy: IfNotPresent
           resources:
             {{- toYaml .Values.resources.postgres | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/var/lib/postgresql/started"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
           volumeMounts:
             - name: psql-data
               mountPath: /var/lib/postgresql
@@ -214,8 +248,33 @@ spec:
         - name: gvmd
           image: {{ .Values.imageRegistry }}/{{ .Values.images.gvmd.repository }}:{{ .Values.images.gvmd.tag }}
           imagePullPolicy: IfNotPresent
+          # The image's start-gvmd reads USER/PASSWORD to create the initial GSA admin
+          # account on first boot (otherwise it defaults to the insecure admin/admin).
+          # We source them from a Secret so the deploy gets a unique generated password.
+          # start-gvmd also waits for postgres before launching, so no wait-init is needed.
+          env:
+            - name: USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "greenbone.fullname" . }}-admin
+                  key: username
+            - name: PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "greenbone.fullname" . }}-admin
+                  key: password
           resources:
             {{- toYaml .Values.resources.gvmd | nindent 12 }}
+          # gvmd creates /run/gvmd/gvmd.sock once it is accepting connections (after the
+          # postgres wait, --migrate, and admin creation). Feed ingestion continues in the
+          # background after this point, so socket presence is the right readiness signal.
+          readinessProbe:
+            exec:
+              command: ["test", "-S", "/run/gvmd/gvmd.sock"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 60
           volumeMounts:
             - name: gvmd-data
               mountPath: /var/lib/gvm
@@ -294,6 +353,13 @@ spec:
               value: 0.0.0.0:80
           resources:
             {{- toYaml .Values.resources.openvasd | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 18
           volumeMounts:
             - name: openvas-data
               mountPath: /etc/openvas
@@ -306,7 +372,6 @@ spec:
         - name: ospd-openvas
           image: {{ .Values.imageRegistry }}/{{ .Values.images.ospdOpenvas.repository }}:{{ .Values.images.ospdOpenvas.tag }}
           imagePullPolicy: IfNotPresent
-          hostname: ospd-openvas.local
           command:
             - ospd-openvas
             - -f
@@ -325,6 +390,16 @@ spec:
               type: Unconfined
           resources:
             {{- toYaml .Values.resources.ospdOpenvas | nindent 12 }}
+          # ospd-openvas exposes its control socket at /run/ospd/ospd-openvas.sock once
+          # the daemon is up; gvmd drives scans through it. VT loading into redis happens
+          # in the background, so socket presence (not full feed load) gates readiness.
+          readinessProbe:
+            exec:
+              command: ["test", "-S", "/run/ospd/ospd-openvas.sock"]
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 40
           volumeMounts:
             - name: gpg-data
               mountPath: /etc/openvas/gnupg
