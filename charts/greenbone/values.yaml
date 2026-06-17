@@ -3,6 +3,13 @@ replicaCount: 1
 imageRegistry: registry.community.greenbone.net/community
 feedRelease: "24.10"
 
+# Initial Greenbone Security Assistant admin account, created by gvmd on first boot.
+# Leave password empty to auto-generate a random one (stored in the
+# greenbone-community-admin Secret and preserved across upgrades).
+admin:
+  user: admin
+  password: ""
+
 images:
   vulnerabilityTests:
     repository: vulnerability-tests

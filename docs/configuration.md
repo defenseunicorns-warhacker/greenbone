@@ -71,8 +71,25 @@ Greenbone Community Edition uses its built-in application authentication. This p
 create a Keycloak client because the upstream Community container stack does not provide a
 documented OIDC or SAML integration point for Greenbone Security Assistant.
 
-After the first deploy, rotate the default Greenbone admin credentials using Greenbone's supported
-administration workflow.
+The gvmd container creates the initial admin account on first boot. Upstream this defaults to the
+well-known `admin`/`admin`; this package instead injects credentials from the
+`greenbone-community-admin` Secret so the deployment gets a unique, randomly generated password
+exposed only inside the cluster. Override the username or supply a fixed password via Helm values:
+
+```yaml
+admin:
+  user: admin
+  password: ""   # empty = generate a random password, preserved across upgrades
+```
+
+Read the generated password with:
+
+```bash
+kubectl -n greenbone get secret greenbone-community-admin -o jsonpath='{.data.password}' | base64 -d
+```
+
+Changing `admin.password` after the first deploy does not rotate the live account (gvmd only
+creates the user once). Use Greenbone's `gvmd --user=<name> --new-password=<pw>` workflow to rotate.
 
 ## Images
 
