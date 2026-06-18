@@ -366,6 +366,28 @@ spec:
             {{- end }}
           # Admin + feed-owner bootstrap for the external DB happens in the gvmd-db-init init
           # container (before the daemon), so no postStart hook is needed here.
+          {{- if not .Values.postgres.embedded }}
+          # start-gvmd's bare `gvmd --create-user` uses gvmd's local-socket default and never
+          # reaches the external DB, so it can't create the GSA admin there. Once the daemon is
+          # up (socket present) and the schema is initialized, ensure the admin in greenbone-db
+          # via an explicit --db-host. Idempotent (create, else reset the password to match the
+          # Secret) and best-effort (trailing `|| true`) so a transient failure never kills the
+          # serving container. Runs as the gvmd user via gosu so it shares the daemon's SysV
+          # semaphore set (a root-run gvmd hits "semaphore operation failed: Permission denied").
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    for i in $(seq 1 60); do [ -S /run/gvmd/gvmd.sock ] && break; sleep 5; done
+                    gosu gvmd gvmd --create-user="$USER" --password="$PASSWORD" \
+                      --db-host={{ .Values.postgres.host }} --db-port={{ .Values.postgres.port }} --db-user={{ .Values.postgres.user }} \
+                    || gosu gvmd gvmd --user="$USER" --new-password="$PASSWORD" \
+                      --db-host={{ .Values.postgres.host }} --db-port={{ .Values.postgres.port }} --db-user={{ .Values.postgres.user }} \
+                    || true
+          {{- end }}
           resources:
             {{- toYaml .Values.resources.gvmd | nindent 12 }}
           # gvmd creates /run/gvmd/gvmd.sock once it is accepting connections (after the
@@ -404,6 +426,32 @@ spec:
             - name: pg-marker
               mountPath: /pgmarker
             {{- end }}
+        {{- if .Values.gvmd.tcpListener.enabled }}
+        # Proxy gvmd's Unix socket to a TCP port so the separate openvas-api Deployment
+        # (in its own pod) can reach gvmd. socat forwards plain TCP 9390 to the socket;
+        # no TLS is needed because both ends are within the cluster namespace.
+        - name: gvmd-proxy
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.gvmd.repository }}:{{ .Values.images.gvmd.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - socat
+            - TCP-LISTEN:{{ .Values.gvmd.tcpListener.port }},reuseaddr,fork
+            - UNIX-CONNECT:/run/gvmd/gvmd.sock
+          ports:
+            - name: gvmd-gmp
+              containerPort: {{ .Values.gvmd.tcpListener.port }}
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: gvmd-gmp
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 12
+          volumeMounts:
+            - name: gvmd-socket
+              mountPath: /run/gvmd
+        {{- end }}
         - name: gsad
           image: {{ .Values.imageRegistry }}/{{ .Values.images.gsad.repository }}:{{ .Values.images.gsad.tag }}
           imagePullPolicy: IfNotPresent

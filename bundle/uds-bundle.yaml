@@ -21,3 +21,10 @@ packages:
             values:
               - path: feeds.secInfo
                 value: false
+    # ref: 24.10-uds.0
+
+  # REST API wrapper for gvmd's GMP protocol, deployed last so the
+  # greenbone-community-gvmd Service and admin Secret already exist.
+  - name: openvas-api
+    path: ../openvas-api
+    ref: dev

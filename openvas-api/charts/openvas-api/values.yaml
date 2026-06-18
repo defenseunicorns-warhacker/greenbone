@@ -1,0 +1,30 @@
+image:
+  repository: zarf.internal/openvas-api
+  tag: dev
+
+replicaCount: 1
+
+port: 80
+
+# gvmd GMP connection. The openvas-api connects to gvmd via TLS on the TCP
+# port exposed by the greenbone-community StatefulSet (see gvmd.tcpListener
+# in the greenbone chart). adminSecretName must match the secret created by
+# the greenbone chart (greenbone-community-admin by default).
+gvm:
+  host: greenbone-community-gvmd
+  port: 9390
+  adminSecretName: greenbone-community-admin
+
+service:
+  port: 80
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

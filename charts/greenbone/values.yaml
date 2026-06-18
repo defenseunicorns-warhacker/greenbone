@@ -86,6 +86,14 @@ images:
     repository: ospd-openvas
     tag: stable
 
+gvmd:
+  tcpListener:
+    # Expose gvmd's GMP protocol on a TCP port so the separate openvas-api
+    # package can reach it from its own pod. TLS is used; the openvas-api
+    # connects with cert verification disabled (gvmd uses a self-signed cert).
+    enabled: true
+    port: 9390
+
 service:
   type: ClusterIP
   ports:
