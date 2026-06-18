@@ -1,0 +1,137 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "greenbone-db.fullname" . }}
+  labels:
+    {{- include "greenbone-db.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "greenbone-db.fullname" . }}
+  selector:
+    matchLabels:
+      {{- include "greenbone-db.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "greenbone-db.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: database
+    spec:
+      serviceAccountName: {{ include "greenbone-db.fullname" . }}
+      # The pg-gvm image starts as root to create and own the cluster data dir, then
+      # pg_ctlcluster drops to the postgres user. PostgreSQL requires its data dir to
+      # be 0700 with no group access, so no fsGroup. RequireNonRootUser is waived via
+      # the UDS Exemption.
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
+      initContainers:
+        # The pg-gvm image ships a pre-built cluster at /var/lib/postgresql/<ver>/main and
+        # start-postgresql does NOT initdb -- it requires that cluster to exist. Docker
+        # named volumes copy image content on first mount, but a Kubernetes PVC mounts
+        # empty, shadowing the cluster; start-postgresql's detect_existing_major then finds
+        # nothing and its `set -e` aborts the script instantly (silent exit 1). Seed the PVC
+        # from the image's cluster on first run, skipping if already initialized so data
+        # survives restarts/redeploys.
+        - name: pg-cluster-init
+          image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              if ls /mnt/*/main/PG_VERSION >/dev/null 2>&1; then
+                echo "postgres cluster already present on volume; skipping seed"
+              else
+                echo "seeding postgres cluster from image into empty volume"
+                cp -a /var/lib/postgresql/. /mnt/
+              fi
+              {{- if .Values.postgres.tuning.enabled }}
+              # Apply WAL/checkpoint tuning idempotently via a marker-delimited block in the
+              # cluster's postgresql.auto.conf (read last by postgres, so it wins). Runs every
+              # start; the sed first strips any prior block so values stay in sync on upgrades.
+              for d in /mnt/*/main; do
+                [ -d "$d" ] || continue
+                conf="$d/postgresql.auto.conf"
+                touch "$conf"
+                sed -i '/# >>> greenbone-db tuning/,/# <<< greenbone-db tuning/d' "$conf"
+                {
+                  echo "# >>> greenbone-db tuning"
+                  echo "max_wal_size = '{{ .Values.postgres.tuning.maxWalSize }}'"
+                  echo "checkpoint_timeout = '{{ .Values.postgres.tuning.checkpointTimeout }}'"
+                  echo "# <<< greenbone-db tuning"
+                } >> "$conf"
+                echo "applied greenbone-db tuning to $conf"
+              done
+              {{- end }}
+          volumeMounts:
+            - name: psql-data
+              mountPath: /mnt
+      containers:
+        - name: postgres
+          image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: IfNotPresent
+          # start-postgresql starts the seeded cluster, then creates the gvmd role/database,
+          # installs uuid-ossp/pgcrypto/pg-gvm, applies POSTGRES_PASSWORD, and listens on
+          # 0.0.0.0:5432 with md5 auth -- all driven by these env vars. (It does not initdb;
+          # the pg-cluster-init initContainer seeds the empty PVC first -- see above.)
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.database | quote }}
+            - name: POSTGRES_HOST_AUTH_METHOD
+              value: {{ .Values.postgres.authMethod | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.credentialsSecret }}
+                  key: password
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          # start-postgresql touches /var/lib/postgresql/started when the cluster is
+          # accepting connections (and removes it on shutdown) -- a clean readiness
+          # signal with no log noise.
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/var/lib/postgresql/started"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: psql-data
+              mountPath: /var/lib/postgresql
+            - name: psql-socket
+              mountPath: /var/run/postgresql
+      volumes:
+        - name: psql-socket
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: psql-data
+      spec:
+        accessModes:
+          {{- toYaml .Values.persistence.accessModes | nindent 10 }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+        {{- if .Values.persistence.storageClass }}
+        storageClassName: {{ .Values.persistence.storageClass | quote }}
+        {{- end }}

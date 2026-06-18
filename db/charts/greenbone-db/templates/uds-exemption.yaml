@@ -1,0 +1,26 @@
+{{- if .Values.exemption.enabled }}
+apiVersion: uds.dev/v1alpha1
+kind: Exemption
+metadata:
+  name: {{ include "greenbone-db.fullname" . }}
+  namespace: {{ .Values.exemption.namespace }}
+spec:
+  exemptions:
+    - title: Greenbone PostgreSQL runs as root and needs CHOWN/SETUID capabilities
+      description: >-
+        The upstream pg-gvm image starts as root to create and own the cluster data
+        directory (PostgreSQL requires a 0700 data dir with no group access, so no
+        fsGroup), chowns its data/config/socket dirs (needs CAP_CHOWN/CAP_FOWNER), and
+        then drops to the postgres user via setpriv/gosu (needs CAP_SETUID/CAP_SETGID).
+        With the baseline DropAllCapabilities policy these chowns and the user switch
+        fail ("operation not permitted"). This matches the official container stack and
+        cannot meet the non-root / drop-all-capabilities baseline.
+      matcher:
+        namespace: {{ .Release.Namespace }}
+        name: {{ include "greenbone-db.fullname" . }}-0
+        kind: pod
+      policies:
+        - RequireNonRootUser
+        - DropAllCapabilities
+        - RestrictCapabilities
+{{- end }}

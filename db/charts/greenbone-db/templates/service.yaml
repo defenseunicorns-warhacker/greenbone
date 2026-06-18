@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "greenbone-db.fullname" . }}
+  labels:
+    {{- include "greenbone-db.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "greenbone-db.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: postgres
+      port: {{ .Values.service.port }}
+      targetPort: postgres
+      protocol: TCP

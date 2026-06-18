@@ -1,0 +1,56 @@
+image:
+  registry: registry.community.greenbone.net/community
+  repository: pg-gvm
+  tag: stable
+
+postgres:
+  user: gvmd
+  # The gvmd image's start-gvmd hard-codes a `psql -d gvmd` readiness check, so the
+  # database name must be "gvmd" for the Greenbone app to connect.
+  database: gvmd
+  # Password for the gvmd DB role. Empty = generate a random one (stored in the
+  # credentials Secret and preserved across upgrades via lookup). The Greenbone app
+  # package reads the SAME Secret in this namespace, so both sides stay in sync.
+  password: ""
+  authMethod: md5
+  # WAL/checkpoint tuning written into the cluster's postgresql.auto.conf by the
+  # pg-cluster-init container. The default max_wal_size (1GB) makes the one-time
+  # SCAP/CERT feed import thrash checkpoints ("occurring too frequently"); raising it
+  # lets the bulk load run faster and quieter. Keep maxWalSize comfortably below
+  # persistence.size (WAL shares the data PVC).
+  tuning:
+    enabled: true
+    maxWalSize: "2GB"
+    checkpointTimeout: "15min"
+
+# Secret (in this namespace) holding the DB credentials. The Greenbone app chart's
+# postgres.existingSecret must match this name.
+credentialsSecret: greenbone-db-credentials
+
+service:
+  port: 5432
+
+persistence:
+  accessModes:
+    - ReadWriteOnce
+  # The SCAP/CERT database plus WAL needs real space; 5Gi is too small once the feed
+  # loads. WAL is capped by postgres.tuning.maxWalSize and shares this volume.
+  size: 20Gi
+  storageClass: ""
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 2Gi
+
+# Waive RequireNonRootUser: the pg-gvm image starts as root to create and own the
+# cluster data dir before dropping to the postgres user.
+exemption:
+  enabled: true
+  namespace: uds-policy-exemptions
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

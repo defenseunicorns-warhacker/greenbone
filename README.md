@@ -22,7 +22,9 @@ The package uses the standard UDS package layout:
 - `charts/greenbone/`: Local Helm chart for the Greenbone Community container stack.
 - `common/zarf.yaml`: Shared Zarf component definitions.
 - `values/`: Helm override files used by Zarf.
-- `bundle/`: Local test bundle definition.
+- `db/`: Separate `greenbone-db` Zarf package — the PostgreSQL (`pg-gvm`) database the
+  application connects to by default. See `docs/justifications.md` (Dependency Packaging).
+- `bundle/`: Local test bundle definition (deploys `greenbone-db` then `greenbone-community`).
 - `docs/`: Configuration and justification documentation.
 
 ## Upstream References

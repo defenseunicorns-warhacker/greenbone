@@ -161,12 +161,10 @@ spec:
           volumeMounts:
             - name: gvmd-data
               mountPath: /mnt
-        # The postgres image ships a pre-created cluster at /var/lib/postgresql/<ver>/main,
-        # and start-postgresql has no initdb path -- it requires that cluster to exist.
-        # Docker named volumes copy image content on first mount, but Kubernetes PVCs do
-        # not, so our empty psql-data PVC would shadow the cluster and postgres exits 1.
-        # Seed the PVC from the image's cluster on first run; skip if already initialized
-        # so existing data survives restarts/redeploys.
+        {{- if .Values.postgres.embedded }}
+        # Embedded mode only. The postgres image ships a pre-created cluster at
+        # /var/lib/postgresql/<ver>/main; an empty PVC would shadow it, so seed the PVC
+        # from the image on first run (skip if already initialized so data survives).
         - name: pg-cluster-init
           image: {{ .Values.imageRegistry }}/{{ .Values.images.pgGvm.repository }}:{{ .Values.images.pgGvm.tag }}
           imagePullPolicy: IfNotPresent
@@ -192,6 +190,34 @@ spec:
               mountPath: /var/lib/postgresql
             - name: psql-socket
               mountPath: /var/run/postgresql
+        {{- else }}
+        # External mode (greenbone-db package). gvmd's start-gvmd waits for a local
+        # postgres "started" marker and a psql connection before launching. With an
+        # external DB there is no local marker, so wait for the external DB to accept
+        # connections, then drop the marker where start-gvmd (PGRES_DATA=/pgmarker)
+        # looks for it; start-gvmd's own psql loop then re-confirms connectivity.
+        - name: wait-for-db
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.gvmd.repository }}:{{ .Values.images.gvmd.tag }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.existingSecret }}
+                  key: {{ .Values.postgres.secretKey }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until pg_isready -h {{ .Values.postgres.host }} -p {{ .Values.postgres.port }} -U {{ .Values.postgres.user }} -d {{ .Values.postgres.database }}; do
+                echo "waiting for postgres at {{ .Values.postgres.host }}:{{ .Values.postgres.port }}"
+                sleep 2
+              done
+              touch /pgmarker/started
+          volumeMounts:
+            - name: pg-marker
+              mountPath: /pgmarker
+        {{- end }}
         - name: configure-openvas
           image: {{ .Values.imageRegistry }}/{{ .Values.images.openvasScanner.repository }}:{{ .Values.images.openvasScanner.tag }}
           imagePullPolicy: IfNotPresent
@@ -228,11 +254,18 @@ spec:
           volumeMounts:
             - name: redis-socket
               mountPath: /run/redis
+        {{- if .Values.postgres.embedded }}
+        # Embedded mode only. By default gvmd uses the external greenbone-db package;
+        # set postgres.embedded=true to run PostgreSQL in-pod instead.
         - name: pg-gvm
           image: {{ .Values.imageRegistry }}/{{ .Values.images.pgGvm.repository }}:{{ .Values.images.pgGvm.tag }}
           imagePullPolicy: IfNotPresent
           resources:
             {{- toYaml .Values.resources.postgres | nindent 12 }}
+          # start-postgresql touches /var/lib/postgresql/started when the cluster is
+          # accepting connections (and removes it on restart); this is the same marker
+          # gvmd waits on. We probe the marker rather than pg_isready, which would connect
+          # as OS user "root" and spam the postgres log with "role root does not exist".
           readinessProbe:
             exec:
               command: ["test", "-f", "/var/lib/postgresql/started"]
@@ -245,13 +278,15 @@ spec:
               mountPath: /var/lib/postgresql
             - name: psql-socket
               mountPath: /var/run/postgresql
+        {{- end }}
         - name: gvmd
           image: {{ .Values.imageRegistry }}/{{ .Values.images.gvmd.repository }}:{{ .Values.images.gvmd.tag }}
           imagePullPolicy: IfNotPresent
-          # The image's start-gvmd reads USER/PASSWORD to create the initial GSA admin
-          # account on first boot (otherwise it defaults to the insecure admin/admin).
-          # We source them from a Secret so the deploy gets a unique generated password.
-          # start-gvmd also waits for postgres before launching, so no wait-init is needed.
+          # USER/PASSWORD feed the GSA admin account (from a Secret, so the deploy gets a
+          # unique password instead of the upstream admin/admin). In embedded mode start-gvmd
+          # creates it directly; in external mode its bare `gvmd --create-user` uses gvmd's
+          # local-socket default and can't reach greenbone-db, so the postStart hook below
+          # ensures the admin against the external DB instead.
           env:
             - name: USER
               valueFrom:
@@ -263,11 +298,55 @@ spec:
                 secretKeyRef:
                   name: {{ include "greenbone.fullname" . }}-admin
                   key: password
+            {{- if not .Values.postgres.embedded }}
+            # External DB: point gvmd (and start-gvmd's psql wait loop, via libpq's
+            # PG* vars) at the greenbone-db service. PGRES_DATA is the dir start-gvmd
+            # checks for the "started" marker the wait-for-db init created.
+            - name: GVMD_ARGS
+              value: "-f --listen-mode=666 --db-host={{ .Values.postgres.host }} --db-port={{ .Values.postgres.port }} --db-user={{ .Values.postgres.user }} --database={{ .Values.postgres.database }}"
+            - name: GVMD_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: PGRES_DATA
+              value: /pgmarker
+            - name: PGHOST
+              value: {{ .Values.postgres.host | quote }}
+            - name: PGPORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.existingSecret }}
+                  key: {{ .Values.postgres.secretKey }}
+            {{- end }}
+          {{- if not .Values.postgres.embedded }}
+          # start-gvmd's bare `gvmd --create-user` uses gvmd's local-socket default and never
+          # reaches the external DB, so it can't create the GSA admin there. Once the daemon is
+          # up (socket present) and the schema is initialized, ensure the admin in greenbone-db
+          # via an explicit --db-host. Idempotent (create, else reset the password to match the
+          # Secret) and best-effort (trailing `|| true`) so a transient failure never kills the
+          # serving container. Runs as the gvmd user via gosu so it shares the daemon's SysV
+          # semaphore set (a root-run gvmd hits "semaphore operation failed: Permission denied").
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    for i in $(seq 1 60); do [ -S /run/gvmd/gvmd.sock ] && break; sleep 5; done
+                    gosu gvmd gvmd --create-user="$USER" --password="$PASSWORD" \
+                      --db-host={{ .Values.postgres.host }} --db-port={{ .Values.postgres.port }} --db-user={{ .Values.postgres.user }} \
+                    || gosu gvmd gvmd --user="$USER" --new-password="$PASSWORD" \
+                      --db-host={{ .Values.postgres.host }} --db-port={{ .Values.postgres.port }} --db-user={{ .Values.postgres.user }} \
+                    || true
+          {{- end }}
           resources:
             {{- toYaml .Values.resources.gvmd | nindent 12 }}
           # gvmd creates /run/gvmd/gvmd.sock once it is accepting connections (after the
-          # postgres wait, --migrate, and admin creation). Feed ingestion continues in the
-          # background after this point, so socket presence is the right readiness signal.
+          # postgres wait and --migrate). Feed ingestion continues in the background after
+          # this point, so socket presence is the right readiness signal.
           readinessProbe:
             exec:
               command: ["test", "-S", "/run/gvmd/gvmd.sock"]
@@ -286,14 +365,19 @@ spec:
               mountPath: /var/lib/gvm/data-objects/gvmd
             - name: vt-data
               mountPath: /var/lib/openvas/plugins
-            - name: psql-data
-              mountPath: /var/lib/postgresql
             - name: gvmd-socket
               mountPath: /run/gvmd
             - name: ospd-openvas-socket
               mountPath: /run/ospd
+            {{- if .Values.postgres.embedded }}
+            - name: psql-data
+              mountPath: /var/lib/postgresql
             - name: psql-socket
               mountPath: /var/run/postgresql
+            {{- else }}
+            - name: pg-marker
+              mountPath: /pgmarker
+            {{- end }}
         - name: gsad
           image: {{ .Values.imageRegistry }}/{{ .Values.images.gsad.repository }}:{{ .Values.images.gsad.tag }}
           imagePullPolicy: IfNotPresent
@@ -416,8 +500,14 @@ spec:
             - name: openvas-log-data
               mountPath: /var/log/openvas
       volumes:
+        {{- if .Values.postgres.embedded }}
         - name: psql-socket
           emptyDir: {}
+        {{- else }}
+        # holds the "started" marker the wait-for-db init drops for start-gvmd
+        - name: pg-marker
+          emptyDir: {}
+        {{- end }}
         - name: gvmd-socket
           emptyDir: {}
         - name: ospd-openvas-socket
@@ -439,6 +529,8 @@ spec:
   volumeClaimTemplates:
     {{- $root := . -}}
     {{- range $name, $cfg := .Values.persistence.volumes }}
+    {{- /* psqlData is only needed when PostgreSQL runs in-pod; external DB owns its own PVC */}}
+    {{- if or $root.Values.postgres.embedded (ne $name "psqlData") }}
     - metadata:
         name: {{ kebabcase $name }}
       spec:
@@ -450,4 +542,5 @@ spec:
         {{- if $root.Values.persistence.storageClass }}
         storageClassName: {{ $root.Values.persistence.storageClass | quote }}
         {{- end }}
+    {{- end }}
     {{- end }}

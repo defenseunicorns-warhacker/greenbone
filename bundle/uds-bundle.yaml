@@ -5,6 +5,13 @@ metadata:
   version: dev
 
 packages:
+  # PostgreSQL (pg-gvm) database, deployed first so the greenbone-db-credentials
+  # Secret exists before gvmd starts. Same namespace as the app, so the app's
+  # IntraNamespace network policy already permits gvmd -> postgres.
+  - name: greenbone-db
+    path: ../db
+    ref: dev-upstream
+
   - name: greenbone-community
     path: ../
     ref: dev
