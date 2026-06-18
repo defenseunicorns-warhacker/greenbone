@@ -6,7 +6,7 @@ components:
     charts:
       - name: greenbone-community-config
         releaseName: greenbone-community-config
-        localPath: ../chart
+        localPath: ../charts/uds-greenbone-config
         version: 0.1.0
         namespace: greenbone
       - name: greenbone

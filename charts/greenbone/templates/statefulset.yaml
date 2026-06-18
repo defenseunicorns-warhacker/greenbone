@@ -191,15 +191,41 @@ spec:
             - name: psql-socket
               mountPath: /var/run/postgresql
         {{- else }}
-        # External mode (greenbone-db package). gvmd's start-gvmd waits for a local
-        # postgres "started" marker and a psql connection before launching. With an
-        # external DB there is no local marker, so wait for the external DB to accept
-        # connections, then drop the marker where start-gvmd (PGRES_DATA=/pgmarker)
-        # looks for it; start-gvmd's own psql loop then re-confirms connectivity.
-        - name: wait-for-db
+        # External mode (greenbone-db package). start-gvmd does its DB setup -- migrate,
+        # create-user, set feed-import-owner -- with bare gvmd commands that use gvmd's
+        # local-socket default, so on an external DB they silently fail and only the daemon
+        # (explicit --db-host in GVMD_ARGS) ever reaches greenbone-db. That left the admin
+        # uncreated and, worse, the feed owner unset until after the daemon's first feed
+        # check, so feed objects (port lists, scan configs) didn't import on first boot.
+        #
+        # Do that whole setup HERE, before the daemon, against the external DB via explicit
+        # --db-host -- the same order start-gvmd uses in embedded mode. Then the daemon starts
+        # with schema + admin + feed owner already in place and imports the feed objects on its
+        # first check (no post-daemon race). Runs as the gvmd user via gosu (SysV semaphore
+        # ownership) with the seeded gvmd-data dir mounted so gvmd has its normal home; every
+        # step is best-effort so re-deploys against an initialized DB stay idempotent. Finally
+        # drops the "started" marker that start-gvmd (PGRES_DATA=/pgmarker) waits on.
+        #
+        # NOTE on the logs: on a FRESH DB, `gvmd --migrate` is a no-op ("already at the supported
+        # version" -- it only upgrades an existing schema). The schema is actually initialized by
+        # `gvmd --create-user`, which probes the version first and logs a benign
+        # `relation "public.meta" does not exist` warning before creating the schema + user
+        # ("User created."). `No SCAP/CERT database found` is also benign (SecInfo still loading).
+        # Both warnings are expected and appear in embedded mode too.
+        - name: gvmd-db-init
           image: {{ .Values.imageRegistry }}/{{ .Values.images.gvmd.repository }}:{{ .Values.images.gvmd.tag }}
           imagePullPolicy: IfNotPresent
           env:
+            - name: USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "greenbone.fullname" . }}-admin
+                  key: username
+            - name: PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "greenbone.fullname" . }}-admin
+                  key: password
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
@@ -209,12 +235,23 @@ spec:
             - /bin/sh
             - -c
             - |
+              DBARGS="--db-host={{ .Values.postgres.host }} --db-port={{ .Values.postgres.port }} --db-user={{ .Values.postgres.user }}"
               until pg_isready -h {{ .Values.postgres.host }} -p {{ .Values.postgres.port }} -U {{ .Values.postgres.user }} -d {{ .Values.postgres.database }}; do
                 echo "waiting for postgres at {{ .Values.postgres.host }}:{{ .Values.postgres.port }}"
                 sleep 2
               done
+              gosu gvmd gvmd --migrate $DBARGS || true
+              gosu gvmd gvmd --create-user="$USER" --password="$PASSWORD" $DBARGS \
+                || gosu gvmd gvmd --user="$USER" --new-password="$PASSWORD" $DBARGS || true
+              uid=$(gosu gvmd gvmd --get-users --verbose $DBARGS 2>/dev/null | awk -v u="$USER" '$1==u{print $2}')
+              if [ -n "$uid" ]; then
+                gosu gvmd gvmd --modify-setting 78eceaec-3385-11ea-b237-28d24461215b --value "$uid" $DBARGS || true
+                gosu gvmd gvmd --modify-setting 1ee1f106-8b2e-461c-b426-7f5d76001b29 --value "$uid" $DBARGS || true
+              fi
               touch /pgmarker/started
           volumeMounts:
+            - name: gvmd-data
+              mountPath: /var/lib/gvm
             - name: pg-marker
               mountPath: /pgmarker
         {{- end }}
@@ -282,11 +319,11 @@ spec:
         - name: gvmd
           image: {{ .Values.imageRegistry }}/{{ .Values.images.gvmd.repository }}:{{ .Values.images.gvmd.tag }}
           imagePullPolicy: IfNotPresent
-          # USER/PASSWORD feed the GSA admin account (from a Secret, so the deploy gets a
-          # unique password instead of the upstream admin/admin). In embedded mode start-gvmd
-          # creates it directly; in external mode its bare `gvmd --create-user` uses gvmd's
-          # local-socket default and can't reach greenbone-db, so the postStart hook below
-          # ensures the admin against the external DB instead.
+          # USER/PASSWORD feed the GSA admin account (from a Secret, so the deploy gets a unique
+          # password instead of the upstream admin/admin). In embedded mode start-gvmd creates it
+          # directly; in external mode the gvmd-db-init init container creates it (and sets the
+          # feed owner) against greenbone-db before this daemon starts -- start-gvmd's own
+          # local-socket create-user attempt here is a harmless no-op.
           env:
             - name: USER
               valueFrom:
@@ -320,28 +357,8 @@ spec:
                   name: {{ .Values.postgres.existingSecret }}
                   key: {{ .Values.postgres.secretKey }}
             {{- end }}
-          {{- if not .Values.postgres.embedded }}
-          # start-gvmd's bare `gvmd --create-user` uses gvmd's local-socket default and never
-          # reaches the external DB, so it can't create the GSA admin there. Once the daemon is
-          # up (socket present) and the schema is initialized, ensure the admin in greenbone-db
-          # via an explicit --db-host. Idempotent (create, else reset the password to match the
-          # Secret) and best-effort (trailing `|| true`) so a transient failure never kills the
-          # serving container. Runs as the gvmd user via gosu so it shares the daemon's SysV
-          # semaphore set (a root-run gvmd hits "semaphore operation failed: Permission denied").
-          lifecycle:
-            postStart:
-              exec:
-                command:
-                  - /bin/sh
-                  - -c
-                  - |
-                    for i in $(seq 1 60); do [ -S /run/gvmd/gvmd.sock ] && break; sleep 5; done
-                    gosu gvmd gvmd --create-user="$USER" --password="$PASSWORD" \
-                      --db-host={{ .Values.postgres.host }} --db-port={{ .Values.postgres.port }} --db-user={{ .Values.postgres.user }} \
-                    || gosu gvmd gvmd --user="$USER" --new-password="$PASSWORD" \
-                      --db-host={{ .Values.postgres.host }} --db-port={{ .Values.postgres.port }} --db-user={{ .Values.postgres.user }} \
-                    || true
-          {{- end }}
+          # Admin + feed-owner bootstrap for the external DB happens in the gvmd-db-init init
+          # container (before the daemon), so no postStart hook is needed here.
           resources:
             {{- toYaml .Values.resources.gvmd | nindent 12 }}
           # gvmd creates /run/gvmd/gvmd.sock once it is accepting connections (after the
