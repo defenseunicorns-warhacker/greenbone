@@ -160,7 +160,7 @@ services:
   nginx:
     image: registry.community.greenbone.net/community/nginx:latest
     ports:
-      - 127.0.0.1:443:443
+      - 127.0.0.1:8443:443
       - 127.0.0.1:9392:9392
     volumes:
       - nginx_config_vol:/etc/nginx/conf.d:ro
@@ -287,6 +287,16 @@ services:
         condition: service_healthy
       notus-data:
         condition: service_healthy
+
+  openvas-api:
+    build: ../openvas-api-test
+    ports:
+      - 127.0.0.1:8080:80
+    volumes:
+      - gvmd_socket_vol:/run/gvmd
+    depends_on:
+      gvmd:
+        condition: service_started
 
   gvm-tools:
     image: registry.community.greenbone.net/community/gvm-tools
