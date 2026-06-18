@@ -345,7 +345,7 @@ spec:
             {{- if not .Values.postgres.embedded }}
             # External DB: point gvmd (and start-gvmd's psql wait loop, via libpq's
             # PG* vars) at the greenbone-db service. PGRES_DATA is the dir start-gvmd
-            # checks for the "started" marker the wait-for-db init created.
+            # checks for the "started" marker the gvmd-db-init init container created.
             - name: GVMD_ARGS
               value: "-f --listen-mode=666 --db-host={{ .Values.postgres.host }} --db-port={{ .Values.postgres.port }} --db-user={{ .Values.postgres.user }} --database={{ .Values.postgres.database }}"
             - name: GVMD_USER
@@ -578,7 +578,7 @@ spec:
         - name: psql-socket
           emptyDir: {}
         {{- else }}
-        # holds the "started" marker the wait-for-db init drops for start-gvmd
+        # holds the "started" marker the gvmd-db-init init container drops for start-gvmd
         - name: pg-marker
           emptyDir: {}
         {{- end }}
