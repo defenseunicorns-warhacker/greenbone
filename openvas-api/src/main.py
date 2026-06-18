@@ -1,7 +1,7 @@
 import uvicorn
 from fastapi import FastAPI
 
-from routers import hosts, reports, results, scans, targets
+from routers import hosts, port_lists, reports, results, scan_configs, scanners, scans, targets
 
 app = FastAPI(
     title="OpenVAS API",
@@ -14,6 +14,9 @@ app = FastAPI(
 )
 
 app.include_router(hosts.router)
+app.include_router(port_lists.router)
+app.include_router(scan_configs.router)
+app.include_router(scanners.router)
 app.include_router(targets.router)
 app.include_router(scans.router)
 app.include_router(reports.router)

@@ -1,8 +1,7 @@
 from fastapi import APIRouter, HTTPException, Path
 from pydantic import BaseModel, Field
 
-from config import DEFAULT_SCAN_CONFIG_ID, DEFAULT_SCANNER_ID
-from gmp import GVM_ERRORS, gmp_session
+from gmp import GVM_ERRORS, find_by_name, gmp_session
 
 router = APIRouter(tags=["scans"])
 
@@ -10,13 +9,13 @@ router = APIRouter(tags=["scans"])
 class CreateScanRequest(BaseModel):
     name: str = Field(description="Display name for the scan task")
     target_id: str = Field(description="GVM target UUID to scan (from `POST /targets`)")
-    config_id: str = Field(
-        default=DEFAULT_SCAN_CONFIG_ID,
-        description="Scan config UUID. Defaults to *Full and fast* (`daba56c8-…`).",
+    config_id: str | None = Field(
+        default=None,
+        description="Scan config UUID (from `GET /scan-configs`). Omit to use *Full and fast*.",
     )
-    scanner_id: str = Field(
-        default=DEFAULT_SCANNER_ID,
-        description="Scanner UUID. Defaults to *OpenVAS Default* (`08b69003-…`).",
+    scanner_id: str | None = Field(
+        default=None,
+        description="Scanner UUID (from `GET /scanners`). Omit to use *OpenVAS Default*.",
     )
 
 
@@ -103,11 +102,25 @@ def create_scan(body: CreateScanRequest) -> ScanCreated:
     once the scan completes.
     """
     with gmp_session() as gmp:
+        config_id = body.config_id
+        if not config_id:
+            configs = gmp.get_scan_configs().findall("config")
+            if not configs:
+                raise HTTPException(502, detail="No scan configs available in GVM")
+            config_id = find_by_name(configs, "Full and fast") or configs[0].get("id")
+
+        scanner_id = body.scanner_id
+        if not scanner_id:
+            scanners = gmp.get_scanners().findall("scanner")
+            if not scanners:
+                raise HTTPException(502, detail="No scanners available in GVM")
+            scanner_id = find_by_name(scanners, "OpenVAS Default") or scanners[0].get("id")
+
         task_resp = gmp.create_task(
             name=body.name,
-            config_id=body.config_id,
+            config_id=config_id,
             target_id=body.target_id,
-            scanner_id=body.scanner_id,
+            scanner_id=scanner_id,
         )
         task_id = task_resp.get("id")
         if not task_id:

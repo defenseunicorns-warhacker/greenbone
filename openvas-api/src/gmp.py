@@ -33,6 +33,14 @@ class _PlainTCPConnection(AbstractGvmConnection):
         self._socket = sock
 
 
+def find_by_name(elements, name: str) -> str | None:
+    """Return the id attribute of the first element whose <name> matches."""
+    for el in elements:
+        if el.findtext("name", "") == name:
+            return el.get("id")
+    return None
+
+
 @contextmanager
 def gmp_session() -> Generator[Gmp, None, None]:
     if GVM_HOST:
