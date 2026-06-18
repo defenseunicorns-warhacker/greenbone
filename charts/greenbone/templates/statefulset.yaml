@@ -80,6 +80,12 @@ spec:
           volumeMounts:
             - name: notus-data
               mountPath: /mnt
+        {{- if .Values.feeds.secInfo }}
+        # SecInfo feeds (SCAP CVE/CPE + CERT advisories). Seeding + the multi-GB SCAP import
+        # dominate gvmd's feed sync and delay when scan configs become available, so this is
+        # gated behind feeds.secInfo: set it false for dev/CI to skip the SecInfo data entirely
+        # (scans still run via NVTs; reports just lack CVE/CPE cross-references) and reach a
+        # scan-ready state far faster. Keep it true for production.
         - name: scap-data
           image: {{ .Values.imageRegistry }}/{{ .Values.images.scapData.repository }}:{{ .Values.images.scapData.tag }}
           imagePullPolicy: IfNotPresent
@@ -107,6 +113,7 @@ spec:
           volumeMounts:
             - name: cert-data
               mountPath: /mnt
+        {{- end }}
         - name: data-objects
           image: {{ .Values.imageRegistry }}/{{ .Values.images.dataObjects.repository }}:{{ .Values.images.dataObjects.tag }}
           imagePullPolicy: IfNotPresent
@@ -374,10 +381,12 @@ spec:
           volumeMounts:
             - name: gvmd-data
               mountPath: /var/lib/gvm
+            {{- if .Values.feeds.secInfo }}
             - name: scap-data
               mountPath: /var/lib/gvm/scap-data
             - name: cert-data
               mountPath: /var/lib/gvm/cert-data
+            {{- end }}
             - name: data-objects
               mountPath: /var/lib/gvm/data-objects/gvmd
             - name: vt-data
@@ -546,8 +555,13 @@ spec:
   volumeClaimTemplates:
     {{- $root := . -}}
     {{- range $name, $cfg := .Values.persistence.volumes }}
-    {{- /* psqlData is only needed when PostgreSQL runs in-pod; external DB owns its own PVC */}}
-    {{- if or $root.Values.postgres.embedded (ne $name "psqlData") }}
+    {{- /* Skip PVCs this configuration doesn't use:
+           - psqlData unless PostgreSQL runs in-pod (the external DB owns its own PVC)
+           - scapData / certData unless SecInfo feeds are enabled */}}
+    {{- $skip := false }}
+    {{- if and (eq $name "psqlData") (not $root.Values.postgres.embedded) }}{{- $skip = true }}{{- end }}
+    {{- if and (or (eq $name "scapData") (eq $name "certData")) (not $root.Values.feeds.secInfo) }}{{- $skip = true }}{{- end }}
+    {{- if not $skip }}
     - metadata:
         name: {{ kebabcase $name }}
       spec:
