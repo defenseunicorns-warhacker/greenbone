@@ -10,6 +10,22 @@ admin:
   user: admin
   password: ""
 
+# PostgreSQL backend for gvmd.
+#   embedded: false (default) -> gvmd connects over TCP to the separate greenbone-db
+#             Zarf package; the in-pod pg-gvm container and psql PVC are not rendered.
+#   embedded: true            -> run the legacy in-pod pg-gvm container instead.
+# The database name must stay "gvmd": the gvmd image's start-gvmd hard-codes a
+# `psql -d gvmd` readiness check. existingSecret is the Secret (same namespace,
+# created by the greenbone-db package) holding the DB password under secretKey.
+postgres:
+  embedded: false
+  host: greenbone-db
+  port: 5432
+  database: gvmd
+  user: gvmd
+  existingSecret: greenbone-db-credentials
+  secretKey: password
+
 images:
   vulnerabilityTests:
     repository: vulnerability-tests

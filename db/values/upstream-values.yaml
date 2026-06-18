@@ -1,0 +1,4 @@
+image:
+  registry: registry.community.greenbone.net/community
+  repository: pg-gvm
+  tag: stable

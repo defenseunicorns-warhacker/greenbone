@@ -73,11 +73,21 @@ readiness must be checked against the pod (for example, `Pod/greenbone-community
 
 ## Dependency Packaging
 
-The upstream Greenbone Community stack ships PostgreSQL and Redis-compatible containers as part of
-the official container topology. This initial package preserves that topology because Greenbone
-coordinates local Unix sockets, filesystem layout, migrations, and service users across the
-containers.
+PostgreSQL is split out of the application pod into a **separate `greenbone-db` Zarf package**
+(`db/`) running the upstream `pg-gvm` image as its own StatefulSet, reachable over TCP at
+`greenbone-db:5432`. The application chart connects gvmd to it by default (`postgres.embedded:
+false`); set `postgres.embedded: true` to fall back to the legacy in-pod pg-gvm container. Both
+packages deploy into the `greenbone` namespace and share a generated `greenbone-db-credentials`
+Secret, so the app's IntraNamespace network policy already permits gvmd → postgres.
 
-For a hardened production package, evaluate replacing the embedded PostgreSQL and Redis-compatible
-containers with the UDS PostgreSQL Operator and Valkey packages. That refactor requires validation
-against Greenbone's supported database and Redis socket configuration.
+The standard UDS PostgreSQL operators (Zalando/CrunchyData) were evaluated and are **not** a drop-in
+replacement: gvmd requires the Greenbone-specific **`pg-gvm` C extension** (`libpg-gvm.so` +
+`pg-gvm--*.sql`), which is not `trusted` and so needs a superuser to install and must be baked into
+the Postgres server image. The official `pg-gvm` image already ships the extension and self-creates
+the `gvmd` role/database/extensions and the superuser `dba` role on first boot, which is why this
+package uses it directly. Adopting an operator would require building and maintaining a custom
+Postgres image carrying `pg-gvm` for the operator's exact PostgreSQL major version.
+
+Redis remains in-pod. The upstream redis-server image listens only on a Unix socket (`port 0`), so
+it is coupled to the scanner/manager via shared sockets and is not trivially externalized; evaluate
+a Valkey/Redis package only with that socket configuration validated.

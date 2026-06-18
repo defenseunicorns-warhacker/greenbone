@@ -9,7 +9,7 @@ network:
     service: greenbone-community
     port: 9392
     targetPort: 9392
-  allowScannerEgress: false
+  allowScannerEgress: true
 
 exemptions:
   enabled: true

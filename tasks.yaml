@@ -23,11 +23,13 @@ tasks:
       - task: create-deploy-test-bundle
 
   - name: create-dev-package
-    description: Create the package
+    description: Create the packages (application + database)
     actions:
       - task: create:package
         with:
           options: "--skip-sbom"
+      - description: Build the greenbone-db package (the bundle references it at ./db)
+        cmd: uds zarf package create ./db --flavor upstream --confirm --skip-sbom --output ./db
 
   - name: create-deploy-test-bundle
     description: Test and validate cluster is deployed with the package
