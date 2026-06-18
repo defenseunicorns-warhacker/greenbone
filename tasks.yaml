@@ -23,13 +23,15 @@ tasks:
       - task: create-deploy-test-bundle
 
   - name: create-dev-package
-    description: Create the packages (application + database)
+    description: Create the packages (application + database + API)
     actions:
       - task: create:package
         with:
           options: "--skip-sbom"
       - description: Build the greenbone-db package (the bundle references it at ./db)
         cmd: uds zarf package create ./db --flavor upstream --confirm --skip-sbom --output ./db
+      - description: Build the openvas-api package (the bundle references it at ./openvas-api)
+        cmd: uds zarf package create ./openvas-api --confirm --skip-sbom --output ./openvas-api
 
   - name: create-deploy-test-bundle
     description: Test and validate cluster is deployed with the package
@@ -68,6 +70,12 @@ tasks:
     actions:
       - description: Create the package
         task: create:package
+
+      - description: Build the greenbone-db package
+        cmd: uds zarf package create ./db --flavor upstream --confirm --output ./db
+
+      - description: Build the openvas-api package
+        cmd: uds zarf package create ./openvas-api --confirm --output ./openvas-api
 
       - description: Setup the cluster
         task: setup:k3d-test-cluster

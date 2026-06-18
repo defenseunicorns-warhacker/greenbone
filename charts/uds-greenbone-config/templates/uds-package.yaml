@@ -17,6 +17,17 @@ spec:
         host: {{ .Values.network.expose.host }}
         port: {{ .Values.network.expose.port }}
         targetPort: {{ .Values.network.expose.targetPort }}
+      {{- if .Values.network.openvasApi.expose.enabled }}
+      - description: OpenVAS REST API
+        service: openvas-api
+        selector:
+          app.kubernetes.io/name: openvas-api
+          app.kubernetes.io/instance: openvas-api
+        gateway: {{ .Values.network.openvasApi.expose.gateway }}
+        host: {{ .Values.network.openvasApi.expose.host }}
+        port: 80
+        targetPort: 80
+      {{- end }}
     allow:
       - direction: Ingress
         remoteGenerated: IntraNamespace

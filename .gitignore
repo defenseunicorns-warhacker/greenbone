@@ -1,5 +1,6 @@
 .zarf-cache/
 zarf-package-*.tar.zst
+openvas-api.tar
 bundle/*.tar.zst
 
 .claude

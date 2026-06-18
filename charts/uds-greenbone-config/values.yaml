@@ -9,6 +9,11 @@ network:
     service: greenbone-community
     port: 9392
     targetPort: 9392
+  openvasApi:
+    expose:
+      enabled: true
+      gateway: tenant
+      host: openvas-api
   allowScannerEgress: false
 
 exemptions:

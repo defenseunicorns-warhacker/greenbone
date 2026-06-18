@@ -1,0 +1,3 @@
+image:
+  repository: zarf.internal/openvas-api
+  tag: dev
