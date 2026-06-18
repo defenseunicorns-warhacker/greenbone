@@ -15,4 +15,9 @@ packages:
   - name: greenbone-community
     path: ../
     ref: dev
-    # ref: 24.10-uds.0
+    overrides:
+        greenbone-community:
+          greenbone:
+            values:
+              - path: feeds.secInfo
+                value: false

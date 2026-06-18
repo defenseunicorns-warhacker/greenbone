@@ -3,6 +3,16 @@ replicaCount: 1
 imageRegistry: registry.community.greenbone.net/community
 feedRelease: "24.10"
 
+# Feed selection.
+#   secInfo: true (default) -> load the SCAP (CVE/CPE) + CERT advisory feeds, so reports
+#            include CVE cross-references. The multi-GB SCAP import dominates gvmd's feed
+#            sync and delays when scan configs become available.
+#   secInfo: false -> skip the SCAP/CERT feeds entirely (no scap-data/cert init containers,
+#            PVCs, or gvmd mounts). Scans still run via NVTs; reports just lack CVE/CPE
+#            enrichment. Use for dev/CI to reach a scan-ready state far faster.
+feeds:
+  secInfo: true
+
 # Initial Greenbone Security Assistant admin account, created by gvmd on first boot.
 # Leave password empty to auto-generate a random one (stored in the
 # greenbone-community-admin Secret and preserved across upgrades).
