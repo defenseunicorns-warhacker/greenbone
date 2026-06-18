@@ -1,8 +1,7 @@
 from fastapi import APIRouter, HTTPException, Path
 from pydantic import BaseModel, Field
 
-from config import DEFAULT_PORT_LIST_ID
-from gmp import GVM_ERRORS, gmp_session
+from gmp import GVM_ERRORS, find_by_name, gmp_session
 
 router = APIRouter(tags=["targets"])
 
@@ -12,9 +11,9 @@ class CreateTargetRequest(BaseModel):
     hosts: str = Field(
         description="Comma-separated IP addresses or CIDR ranges, e.g. `192.168.1.0/24,10.0.0.1`"
     )
-    port_list_id: str = Field(
-        default=DEFAULT_PORT_LIST_ID,
-        description="GVM port list UUID. Defaults to *All IANA assigned TCP* (`33d0cd82-…`).",
+    port_list_id: str | None = Field(
+        default=None,
+        description="GVM port list UUID (from `GET /port-lists`). Omit to use the first available port list.",
     )
 
 
@@ -67,6 +66,9 @@ def create_target(body: CreateTargetRequest) -> Target:
     The `hosts` field accepts any combination of individual IPs, CIDR ranges,
     and IP ranges (e.g. `10.0.0.1-10.0.0.50`), separated by commas.
 
+    If `port_list_id` is omitted, the first available port list in GVM is used
+    automatically. Use `GET /port-lists` to see available options.
+
     The returned `id` is used as `target_id` when creating a scan via
     `POST /scans`.
     """
@@ -75,10 +77,21 @@ def create_target(body: CreateTargetRequest) -> Target:
         raise HTTPException(400, detail="hosts must not be empty")
 
     with gmp_session() as gmp:
+        port_list_id = body.port_list_id
+        if not port_list_id:
+            pl_response = gmp.get_port_lists()
+            port_lists = pl_response.findall("port_list")
+            if not port_lists:
+                raise HTTPException(502, detail="No port lists available in GVM")
+            port_list_id = (
+                find_by_name(port_lists, "All IANA assigned TCP")
+                or port_lists[0].get("id")
+            )
+
         response = gmp.create_target(
             name=body.name,
             hosts=hosts,
-            port_list_id=body.port_list_id,
+            port_list_id=port_list_id,
         )
 
     target_id = response.get("id")
