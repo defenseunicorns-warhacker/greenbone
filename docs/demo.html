@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Greenbone OpenVAS — Workflow</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --green: #3fb950;
+    --blue: #58a6ff;
+    --orange: #f78166;
+    --yellow: #e3b341;
+    --purple: #bc8cff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 40px 24px 80px;
+  }
+  h1 {
+    text-align: center;
+    font-size: 1.7rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+    background: linear-gradient(135deg, var(--blue), var(--green));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .subtitle { text-align: center; color: var(--muted); margin-bottom: 36px; font-size: 0.88rem; }
+  .diagram-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 20px;
+    max-width: 1100px;
+    margin: 0 auto 40px;
+    overflow-x: auto;
+  }
+  .diagram-title {
+    font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--muted); margin-bottom: 20px;
+    text-align: center;
+  }
+  svg { display: block; width: 100%; height: auto; }
+
+  .legend {
+    display: flex; justify-content: center; gap: 28px;
+    flex-wrap: wrap; margin-bottom: 28px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 0.73rem; color: var(--muted); }
+  .legend-rect { width: 22px; height: 12px; border-radius: 2px; border: 1.5px solid; }
+
+  .workflow-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  .workflow-layout .diagram-wrap {
+    width: 100%;
+    margin: 0 auto;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 14px;
+  }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 18px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: var(--blue); }
+  .card-title { font-size: 0.82rem; font-weight: 700; margin-bottom: 5px; }
+  .card-body  { font-size: 0.75rem; color: var(--muted); line-height: 1.55; }
+  .badge {
+    display: inline-block; font-size: 0.6rem; font-weight: 700;
+    padding: 2px 6px; border-radius: 8px; margin-bottom: 7px;
+  }
+  .badge-new      { background: rgba(63,185,80,0.12);  color: var(--green);  border: 1px solid var(--green); }
+  .badge-existing { background: rgba(88,166,255,0.10); color: var(--blue);   border: 1px solid var(--blue); }
+  .badge-enhanced { background: rgba(247,129,102,0.10);color: var(--orange); border: 1px solid var(--orange); }
+
+  .cards-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .cards-col { display: flex; flex-direction: column; gap: 12px; }
+  .cards-label {
+    font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--muted); padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+
+<h1>Greenbone OpenVAS Integration</h1>
+<p class="subtitle">Security scanning workflow for Kubernetes</p>
+
+<div class="workflow-layout">
+  <div class="diagram-wrap">
+    <div class="diagram-title">Software Delivery + Live Infrastructure Scanning</div>
+    <!--
+      ViewBox: 0 0 1060 340
+      Top row: same 6 nodes at yCtr=90
+      New node: OpenVAS at cx=980, yCtr=255 (below K8s)
+      L-path: OpenVAS left edge (910,255) → left to (800,255) → up to CAT bottom (800,117)
+      Path length: (910-800) + (255-117) = 110 + 138 = 248
+      Return path same, reversed.
+      Vertical K8s → OpenVAS: (980,117) → (980,228), length 111
+    -->
+    <svg viewBox="0 0 1060 360" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="n-ah-bl" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0,0 8,3 0,6" fill="#58a6ff"/>
+        </marker>
+        <marker id="n-ah-or" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0,0 8,3 0,6" fill="#e3b341"/>
+        </marker>
+        <marker id="n-ah-gr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0,0 8,3 0,6" fill="#3fb950"/>
+        </marker>
+        <marker id="n-ah-grn" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0,0 8,3 0,6" fill="#3fb950"/>
+        </marker>
+        <marker id="n-ah-orng" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0,0 8,3 0,6" fill="#f78166"/>
+        </marker>
+        <marker id="n-ah-pur" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0,0 8,3 0,6" fill="#6e40c9"/>
+        </marker>
+        <marker id="n-ah-red" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0,0 8,3 0,6" fill="#f85149"/>
+        </marker>
+        <marker id="n-ah-pur-up" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0,0 8,3 0,6" fill="#bc8cff"/>
+        </marker>
+        <pattern id="grid2" width="20" height="20" patternUnits="userSpaceOnUse">
+          <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#21262d" stroke-width="0.5"/>
+        </pattern>
+
+        <!-- ── Icon symbols ── -->
+        <!-- Developer: person silhouette -->
+        <symbol id="ico-person" viewBox="0 0 12 12">
+          <circle cx="6" cy="3.5" r="2.3" fill="currentColor"/>
+          <path d="M 1.5 11.5 C 1.5 7.5 10.5 7.5 10.5 11.5" fill="currentColor"/>
+        </symbol>
+        
+        
+        <!-- Static Scan: magnifying glass -->
+        <symbol id="ico-magnify" viewBox="0 0 12 12">
+          <circle cx="4.8" cy="4.8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+          <line x1="7.5" y1="7.5" x2="11" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </symbol>
+        
+        
+
+        <!-- Security lock (CAT) -->
+        <symbol id="ico-lock" viewBox="0 0 12 12">
+          <rect x="1.5" y="5.5" width="9" height="6.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.1"/>
+          <path d="M 3.5 5.5 V 3.8 C 3.5 1.8 8.5 1.8 8.5 3.8 V 5.5" fill="none" stroke="currentColor" stroke-width="1.1"/>
+          <circle cx="6" cy="8.5" r="1.1" fill="currentColor"/>
+        </symbol>
+      </defs>
+
+      <rect width="1060" height="360" fill="url(#grid2)"/>
+
+      <!-- phase bands — nodes are y=58..128 (h=70), bands cover to y=190 -->
+      <rect x="10" y="8" width="578" height="182" rx="6" fill="#58a6ff" opacity="0.04" stroke="#58a6ff" stroke-width="0.5" stroke-opacity="0.15"/>
+      <rect x="596" y="8" width="205" height="182" rx="6" fill="#e3b341" opacity="0.05" stroke="#e3b341" stroke-width="0.5" stroke-opacity="0.15"/>
+      <rect x="809" y="8" width="241" height="182" rx="6" fill="#3fb950" opacity="0.04" stroke="#3fb950" stroke-width="0.5" stroke-opacity="0.15"/>
+
+      <!-- live scanning loop band -->
+      <rect x="730" y="205" width="320" height="142" rx="6" fill="#3fb950" opacity="0.04" stroke="#3fb950" stroke-width="0.5" stroke-opacity="0.2"/>
+      <text x="890" y="219" text-anchor="middle" fill="#3fb950" font-size="8.5" font-family="system-ui,sans-serif" font-weight="600" letter-spacing="0.12em" opacity="0.7">LIVE SCANNING LOOP</text>
+
+      <!-- phase labels -->
+      <text x="299" y="22" text-anchor="middle" fill="#58a6ff" font-size="8.5" font-family="system-ui,sans-serif" font-weight="600" letter-spacing="0.12em" opacity="0.7">BUILD &amp; PACKAGE</text>
+      <text x="698" y="22" text-anchor="middle" fill="#e3b341" font-size="8.5" font-family="system-ui,sans-serif" font-weight="600" letter-spacing="0.12em" opacity="0.7">COMPLIANCE</text>
+      <text x="929" y="22" text-anchor="middle" fill="#3fb950" font-size="8.5" font-family="system-ui,sans-serif" font-weight="600" letter-spacing="0.12em" opacity="0.7">DEPLOY</text>
+
+      <!-- ── Top row arrows at y=93 (center of 58..128) ── -->
+      <line x1="160" y1="93" x2="200" y2="93" stroke="#30363d" stroke-width="1.5" marker-end="url(#n-ah-bl)"/>
+      <line x1="335" y1="93" x2="375" y2="93" stroke="#30363d" stroke-width="1.5" marker-end="url(#n-ah-bl)"/>
+      <line x1="510" y1="93" x2="550" y2="93" stroke="#30363d" stroke-width="1.5" marker-end="url(#n-ah-or)"/>
+      <line x1="695" y1="93" x2="728" y2="93" stroke="#30363d" stroke-width="1.5" marker-end="url(#n-ah-or)"/>
+      <line x1="870" y1="93" x2="908" y2="93" stroke="#30363d" stroke-width="1.5" marker-end="url(#n-ah-gr)"/>
+
+      <!-- ── Top row animated dots ── -->
+      <line x1="160" y1="93" x2="200" y2="93" stroke="#58a6ff" stroke-width="2.5" stroke-dasharray="7 33" stroke-dashoffset="40">
+        <animate attributeName="stroke-dashoffset" from="40" to="0" dur="1.1s" repeatCount="indefinite"/>
+      </line>
+      <line x1="335" y1="93" x2="375" y2="93" stroke="#58a6ff" stroke-width="2.5" stroke-dasharray="7 33" stroke-dashoffset="40">
+        <animate attributeName="stroke-dashoffset" from="40" to="0" dur="1.1s" begin="0.18s" repeatCount="indefinite"/>
+      </line>
+      <line x1="510" y1="93" x2="550" y2="93" stroke="#e3b341" stroke-width="2.5" stroke-dasharray="7 33" stroke-dashoffset="40">
+        <animate attributeName="stroke-dashoffset" from="40" to="0" dur="1.1s" begin="0.36s" repeatCount="indefinite"/>
+      </line>
+      <line x1="695" y1="93" x2="730" y2="93" stroke="#e3b341" stroke-width="2.5" stroke-dasharray="7 28" stroke-dashoffset="35">
+        <animate attributeName="stroke-dashoffset" from="35" to="0" dur="1.1s" begin="0.45s" repeatCount="indefinite"/>
+      </line>
+      <line x1="870" y1="93" x2="910" y2="93" stroke="#3fb950" stroke-width="2.5" stroke-dasharray="7 33" stroke-dashoffset="40">
+        <animate attributeName="stroke-dashoffset" from="40" to="0" dur="1.1s" begin="0.63s" repeatCount="indefinite"/>
+      </line>
+
+      <!-- ── Top row nodes: y=58, h=70, bottom=128 ── -->
+
+      <!-- 1: Developer -->
+      <rect x="20" y="58" width="140" height="70" rx="5" fill="#0c1e35" stroke="#58a6ff" stroke-width="1.5"/>
+      <use href="#ico-person" x="83" y="64" width="14" height="14" color="#58a6ff" opacity="0.8"/>
+      <text x="90" y="92" text-anchor="middle" fill="#58a6ff" font-size="11" font-family="system-ui,sans-serif" font-weight="700">Developer</text>
+      <text x="90" y="108" text-anchor="middle" fill="#8b949e" font-size="10" font-family="system-ui,sans-serif">App Code</text>
+      <rect x="20" y="58" width="18" height="70" rx="5" fill="#58a6ff" opacity="0.15"/>
+      <text x="29" y="97" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="system-ui,sans-serif" font-weight="700">1</text>
+
+      <!-- 2: Container Image -->
+      <rect x="200" y="58" width="140" height="70" rx="5" fill="#0c1e35" stroke="#58a6ff" stroke-width="1.5"/>
+      <image href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjggMTI4Ij48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGNsaXAtcnVsZT0iZXZlbm9kZCIgZmlsbD0iIzNBNEQ1NCIgZD0iTTczLjggNTAuOGgxMS4zdjExLjVoNS43YzIuNiAwIDUuMy0uNSA3LjgtMS4zIDEuMi0uNCAyLjYtMSAzLjgtMS43LTEuNi0yLjEtMi40LTQuNy0yLjYtNy4zLS4zLTMuNS40LTguMSAyLjgtMTAuOGwxLjItMS40IDEuNCAxLjFjMy42IDIuOSA2LjUgNi44IDcuMSAxMS40IDQuMy0xLjMgOS4zLTEgMTMuMSAxLjJsMS41LjktLjggMS42Yy0zLjIgNi4yLTkuOSA4LjItMTYuNCA3LjgtOS44IDI0LjMtMzEgMzUuOC01Ni44IDM1LjgtMTMuMyAwLTI1LjUtNS0zMi41LTE2LjhsLS4xLS4yLTEtMi4xYy0yLjQtNS4yLTMuMS0xMC45LTIuNi0xNi42bC4yLTEuN2g5LjZWNTAuOGgxMS4zVjM5LjZoMjIuNVYyOC4zaDEzLjV2MjIuNXoiLz48cGF0aCBmaWxsPSIjMDBBQURBIiBkPSJNMTEwLjQgNTUuMWMuOC01LjktMy42LTEwLjUtNi40LTEyLjctMy4xIDMuNi0zLjYgMTMuMiAxLjMgMTcuMi0yLjggMi40LTguNSA0LjctMTQuNSA0LjdIMTguNmMtLjYgNi4yLjUgMTEuOSAzIDE2LjhsLjggMS41Yy41LjkgMS4xIDEuNyAxLjcgMi42IDMgLjIgNS43LjMgOC4yLjIgNC45LS4xIDguOS0uNyAxMi0xLjcuNS0uMi45LjEgMS4xLjUuMi41LS4xLjktLjUgMS4xLS40LjEtLjguMy0xLjMuNC0yLjQuNy01IDEuMS04LjMgMS4zaC0uNmMtMS4zLjEtMi43LjEtNC4yLjEtMS42IDAtMy4xIDAtNC45LS4xIDYgNi44IDE1LjQgMTAuOCAyNy4yIDEwLjggMjUgMCA0Ni4yLTExLjEgNTUuNS0zNS45IDYuNy43IDEzLjEtMSAxNi02LjctNC41LTIuNy0xMC41LTEuOC0xMy45LS4xeiIvPjxwYXRoIGZpbGw9IiMyOEI4RUIiIGQ9Ik0xMTAuNCA1NS4xYy44LTUuOS0zLjYtMTAuNS02LjQtMTIuNy0zLjEgMy42LTMuNiAxMy4yIDEuMyAxNy4yLTIuOCAyLjQtOC41IDQuNy0xNC41IDQuN2gtNjhjLS4zIDkuNSAzLjIgMTYuNyA5LjUgMjEgNC45LS4xIDguOS0uNyAxMi0xLjcuNS0uMi45LjEgMS4xLjUuMi41LS4xLjktLjUgMS4xLS40LjEtLjguMy0xLjMuNC0yLjQuNy01LjIgMS4yLTguNSAxLjRsLS4xLS4xYzguNSA0LjQgMjAuOCA0LjMgMzUtMS4xIDE1LjgtNi4xIDMwLjYtMTcuNyA0MC45LTMwLjktLjIuMS0uNC4xLS41LjJ6Ii8+PHBhdGggZmlsbD0iIzAyOEJCOCIgZD0iTTE4LjcgNzEuOGMuNCAzLjMgMS40IDYuNCAyLjkgOS4zbC44IDEuNWMuNS45IDEuMSAxLjcgMS43IDIuNiAzIC4yIDUuNy4zIDguMi4yIDQuOS0uMSA4LjktLjcgMTItMS43LjUtLjIuOS4xIDEuMS41LjIuNS0uMS45LS41IDEuMS0uNC4xLS44LjMtMS4zLjQtMi40LjctNS4yIDEuMi04LjUgMS40aC0uNGMtMS4zLjEtMi43LjEtNC4xLjEtMS42IDAtMy4yIDAtNC45LS4xIDYgNi44IDE1LjUgMTAuOCAyNy4zIDEwLjggMjEuNCAwIDQwLTguMSA1MC44LTI2SDE4Ljd2LS4xeiIvPjxwYXRoIGZpbGw9IiMwMTlCQzYiIGQ9Ik0yMy41IDcxLjhjMS4zIDUuOCA0LjMgMTAuNCA4LjggMTMuNSA0LjktLjEgOC45LS43IDEyLTEuNy41LS4yLjkuMSAxLjEuNS4yLjUtLjEuOS0uNSAxLjEtLjQuMS0uOC4zLTEuMy40LTIuNC43LTUuMiAxLjItOC42IDEuNCA4LjUgNC40IDIwLjggNC4zIDM0LjktMS4xIDguNS0zLjMgMTYuOC04LjIgMjQuMi0xNC4xSDIzLjV6Ii8+PHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBjbGlwLXJ1bGU9ImV2ZW5vZGQiIGZpbGw9IiMwMEFDRDMiIGQ9Ik0yOC40IDUyLjdoOS44djkuOGgtOS44di05Ljh6bS44LjhoLjh2OC4xaC0uOHYtOC4xem0xLjQgMGguOHY4LjFoLS44di04LjF6bTEuNSAwaC44djguMWgtLjh2LTguMXptMS41IDBoLjh2OC4xaC0uOHYtOC4xem0xLjUgMGguOHY4LjFoLS44di04LjF6bTEuNSAwaC44djguMWgtLjh2LTguMXptMy0xMmg5Ljh2OS44aC05Ljh2LTkuOHptLjkuOGguOHY4LjFoLS44di04LjF6bTEuNCAwaC44djguMWgtLjh2LTguMXptMS41IDBoLjh2OC4xaC0uOHYtOC4xem0xLjUgMGguOHY4LjFoLS44di04LjF6bTEuNCAwaC44djguMWgtLjh2LTguMXptMS41IDBoLjh2OC4xaC0uOHYtOC4xeiIvPjxwYXRoIGZpbGwtcnVsZT0iZXZlbm9kZCIgY2xpcC1ydWxlPSJldmVub2RkIiBmaWxsPSIjMjNDMkVFIiBkPSJNMzkuNiA1Mi43aDkuOHY5LjhoLTkuOHYtOS44em0uOS44aC44djguMWgtLjh2LTguMXptMS40IDBoLjh2OC4xaC0uOHYtOC4xem0xLjUgMGguOHY4LjFoLS44di04LjF6bTEuNSAwaC44djguMWgtLjh2LTguMXptMS40IDBoLjh2OC4xaC0uOHYtOC4xem0xLjUgMGguOHY4LjFoLS44di04LjF6Ii8+PHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBjbGlwLXJ1bGU9ImV2ZW5vZGQiIGZpbGw9IiMwMEFDRDMiIGQ9Ik01MC45IDUyLjdoOS44djkuOGgtOS44di05Ljh6bS44LjhoLjh2OC4xaC0uOHYtOC4xem0xLjUgMGguOHY4LjFoLS44di04LjF6bTEuNSAwaC44djguMWgtLjh2LTguMXptMS40IDBoLjh2OC4xaC0uOHYtOC4xem0xLjUgMGguOHY4LjFoLS44di04LjF6bTEuNSAwaC44djguMWgtLjh2LTguMXoiLz48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGNsaXAtcnVsZT0iZXZlbm9kZCIgZmlsbD0iIzIzQzJFRSIgZD0iTTUwLjkgNDEuNWg5Ljh2OS44aC05Ljh2LTkuOHptLjguOGguOHY4LjFoLS44di04LjF6bTEuNSAwaC44djguMWgtLjh2LTguMXptMS41IDBoLjh2OC4xaC0uOHYtOC4xem0xLjQgMGguOHY4LjFoLS44di04LjF6bTEuNSAwaC44djguMWgtLjh2LTguMXptMS41IDBoLjh2OC4xaC0uOHYtOC4xem0zLjEgMTAuNEg3MnY5LjhoLTkuOHYtOS44em0uOC44aC44djguMUg2M3YtOC4xem0xLjUgMGguOHY4LjFoLS44di04LjF6bTEuNCAwaC44djguMWgtLjh2LTguMXptMS41IDBoLjh2OC4xaC0uOHYtOC4xem0xLjUgMGguOHY4LjFoLS44di04LjF6bTEuNSAwaC44djguMWgtLjh2LTguMXoiLz48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGNsaXAtcnVsZT0iZXZlbm9kZCIgZmlsbD0iIzAwQUNEMyIgZD0iTTYyLjIgNDEuNUg3MnY5LjhoLTkuOHYtOS44em0uOC44aC44djguMUg2M3YtOC4xem0xLjUgMGguOHY4LjFoLS44di04LjF6bTEuNCAwaC44djguMWgtLjh2LTguMXptMS41IDBoLjh2OC4xaC0uOHYtOC4xem0xLjUgMGguOHY4LjFoLS44di04LjF6bTEuNSAwaC44djguMWgtLjh2LTguMXoiLz48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGNsaXAtcnVsZT0iZXZlbm9kZCIgZmlsbD0iIzIzQzJFRSIgZD0iTTYyLjIgMzAuMkg3MlY0MGgtOS44di05Ljh6bS44LjhoLjh2OC4xSDYzVjMxem0xLjUgMGguOHY4LjFoLS44VjMxem0xLjQgMGguOHY4LjFoLS44VjMxem0xLjUgMGguOHY4LjFoLS44VjMxem0xLjUgMGguOHY4LjFoLS44VjMxem0xLjUgMGguOHY4LjFoLS44VjMxeiIvPjxwYXRoIGZpbGwtcnVsZT0iZXZlbm9kZCIgY2xpcC1ydWxlPSJldmVub2RkIiBmaWxsPSIjMDBBQ0QzIiBkPSJNNzMuNSA1Mi43aDkuOHY5LjhoLTkuOHYtOS44em0uOC44aC44djguMWgtLjh2LTguMXptMS40IDBoLjh2OC4xaC0uOHYtOC4xem0xLjUgMGguOHY4LjFoLS44di04LjF6bTEuNSAwaC44djguMWgtLjh2LTguMXptMS41IDBoLjh2OC4xaC0uOHYtOC4xem0xLjUgMGguOHY4LjFoLS44di04LjF6Ii8+PHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBjbGlwLXJ1bGU9ImV2ZW5vZGQiIGZpbGw9IiNENEVFRjEiIGQ9Ik00OC44IDc4LjNjMS41IDAgMi43IDEuMiAyLjcgMi43IDAgMS41LTEuMiAyLjctMi43IDIuNy0xLjUgMC0yLjctMS4yLTIuNy0yLjcgMC0xLjUgMS4yLTIuNyAyLjctMi43Ii8+PHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBjbGlwLXJ1bGU9ImV2ZW5vZGQiIGZpbGw9IiMzQTRENTQiIGQ9Ik00OC44IDc5LjFjLjIgMCAuNSAwIC43LjEtLjIuMS0uNC40LS40LjcgMCAuNC40LjguOC44LjMgMCAuNi0uMi43LS40LjEuMi4xLjUuMS43IDAgMS4xLS45IDEuOS0xLjkgMS45LTEuMSAwLTEuOS0uOS0xLjktMS45IDAtMSAuOC0xLjkgMS45LTEuOU0xLjEgNzIuOGgxMjUuNGMtMi43LS43LTguNi0xLjYtNy43LTUuMi01IDUuNy0xNi45IDQtMjAgMS4yLTMuNCA0LjktMjMgMy0yNC4zLS44LTQuMiA1LTE3LjMgNS0yMS41IDAtMS40IDMuOC0yMSA1LjctMjQuMy44LTMgMi44LTE1IDQuNS0yMC0xLjIgMS4xIDMuNS00LjkgNC41LTcuNiA1LjIiLz48cGF0aCBmaWxsPSIjQkZEQkUwIiBkPSJNNTYgOTcuOGMtNi43LTMuMi0xMC4zLTcuNS0xMi40LTEyLjItMi41LjctNS41IDEuMi04LjkgMS40LTEuMy4xLTIuNy4xLTQuMS4xLTEuNyAwLTMuNCAwLTUuMi0uMSA2IDYgMTMuNiAxMC43IDI3LjUgMTAuOEg1NnoiLz48cGF0aCBmaWxsPSIjRDRFRUYxIiBkPSJNNDYuMSA4OS45Yy0uOS0xLjMtMS44LTIuOC0yLjUtNC4zLTIuNS43LTUuNSAxLjItOC45IDEuNCAyLjMgMS4yIDUuNyAyLjQgMTEuNCAyLjl6Ii8+PC9zdmc+" x="263" y="64" width="14" height="14"/>
+      <text x="270" y="92" text-anchor="middle" fill="#58a6ff" font-size="11" font-family="system-ui,sans-serif" font-weight="700">Container Image</text>
+      <text x="270" y="108" text-anchor="middle" fill="#8b949e" font-size="10" font-family="system-ui,sans-serif">Docker + Helm Chart</text>
+      <rect x="200" y="58" width="18" height="70" rx="5" fill="#58a6ff" opacity="0.15"/>
+      <text x="209" y="97" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="system-ui,sans-serif" font-weight="700">2</text>
+
+      <!-- 3: Zarf Package -->
+      <rect x="375" y="58" width="140" height="70" rx="5" fill="#0c1e35" stroke="#58a6ff" stroke-width="1.5"/>
+      <image href="https://zarf.dev/images/zarf-images/Zarf-No-wordmark.svg" x="438" y="64" width="14" height="14"/>
+      <text x="445" y="92" text-anchor="middle" fill="#58a6ff" font-size="11" font-family="system-ui,sans-serif" font-weight="700">Zarf Package</text>
+      <text x="445" y="108" text-anchor="middle" fill="#8b949e" font-size="10" font-family="system-ui,sans-serif">Airgap Bundle</text>
+      <rect x="375" y="58" width="18" height="70" rx="5" fill="#58a6ff" opacity="0.15"/>
+      <text x="384" y="97" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="system-ui,sans-serif" font-weight="700">3</text>
+
+      <!-- 4: Static Scan -->
+      <rect x="550" y="58" width="145" height="70" rx="5" fill="#1e1500" stroke="#e3b341" stroke-width="1.5"/>
+      <use href="#ico-magnify" x="615" y="64" width="14" height="14" color="#e3b341" opacity="0.8"/>
+      <text x="622" y="91" text-anchor="middle" fill="#e3b341" font-size="11" font-family="system-ui,sans-serif" font-weight="700">Static Scan</text>
+      <text x="622" y="105" text-anchor="middle" fill="#8b949e" font-size="9.5" font-family="system-ui,sans-serif">Trivy · Grype · ClamAV</text>
+      <text x="622" y="119" text-anchor="middle" fill="#8b949e" font-size="9.5" font-family="system-ui,sans-serif">OpenSCAP</text>
+      <rect x="550" y="58" width="18" height="70" rx="5" fill="#e3b341" opacity="0.18"/>
+      <text x="559" y="97" text-anchor="middle" fill="#e3b341" font-size="9" font-family="system-ui,sans-serif" font-weight="700">4</text>
+
+      <!-- 5: CAT -->
+      <rect x="730" y="58" width="140" height="70" rx="5" fill="#1e1500" stroke="#e3b341" stroke-width="1.5"/>
+      <use href="#ico-lock" x="793" y="64" width="14" height="14" color="#e3b341" opacity="0.85"/>
+      <text x="800" y="92" text-anchor="middle" fill="#e3b341" font-size="11" font-family="system-ui,sans-serif" font-weight="700">CAT</text>
+      <text x="800" y="108" text-anchor="middle" fill="#8b949e" font-size="10" font-family="system-ui,sans-serif">ISSM Review</text>
+      <rect x="730" y="58" width="18" height="70" rx="5" fill="#e3b341" opacity="0.18"/>
+      <text x="739" y="97" text-anchor="middle" fill="#e3b341" font-size="9" font-family="system-ui,sans-serif" font-weight="700">5</text>
+
+      <!-- ── Cluster boundary: K8s + OpenVAS ── -->
+      <rect x="903" y="46" width="152" height="272" rx="8" fill="none" stroke="#3fb950" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.4"/>
+      <text x="979" y="41" text-anchor="middle" fill="#3fb950" font-size="7.5" font-family="system-ui,sans-serif" font-weight="600" letter-spacing="0.1em" opacity="0.7">PRODUCTION CLUSTER</text>
+
+            <!-- 6: App Namespace -->
+      <rect x="910" y="58" width="140" height="70" rx="5" fill="#0a1f10" stroke="#3fb950" stroke-width="1.5"/>
+      <image href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjggMTI4Ij48cGF0aCBmaWxsPSIjMzI2Y2U1IiBkPSJNNjMuNTU2IDEuOTExYTguNTEgOC40NCAwIDAgMC0zLjI2LjgyNkwxNS43OTQgMjRhOC41MSA4LjQ0IDAgMCAwLTQuNjAzIDUuNzI1TC4yMTQgNzcuNDg0YTguNTEgOC40NCAwIDAgMCAxLjE1NCA2LjQ3IDguNTEgOC40NCAwIDAgMCAuNDg1LjY3M2wzMC43OTkgMzguMjk3YTguNTEgOC40NCAwIDAgMCA2LjY1NCAzLjE3NWw0OS4zOTMtLjAxMWE4LjUxIDguNDQgMCAwIDAgNi42NTQtMy4xN2wzMC43OS0zOC4zMDNhOC41MSA4LjQ0IDAgMCAwIDEuNjQ0LTcuMTRsLTEwLjk5Ni00Ny43NmE4LjUxIDguNDQgMCAwIDAtNC42MDQtNS43MjdMNjcuNjgxIDIuNzM4YTguNTEgOC40NCAwIDAgMC00LjEyNS0uODI3Wm0uNDQgMTYuMjUyYzEuNDcgMCAyLjY2NCAxLjMyNyAyLjY2NCAyLjk2MSAwIC4yMzIuMDE0LjU0NC4wMDYuNzU4LS4wMzQuOTQzLS4yNCAxLjY2Mi0uMzY0IDIuNTMxLS4yMjQgMS44NTgtLjQxNyAzLjQtLjMgNC44MzIuMTA1LjcxNy41MjIgMSAuODY5IDEuMzMyYTYzLjYyNCA2My42MjQgMCAwIDAgLjA2MiAxLjE5YzguNDY4Ljc1MSAxNi4zMzUgNC42MjUgMjIuMTEyIDEwLjY4MmwxLjAxMS0uNzIzYy4zNDMuMDIxIDEuMS4xMjQgMS42MTgtLjE3NiAxLjE5LS44MDIgMi4yNzYtMS45MTUgMy41OS0zLjI1LjYwMS0uNjM4IDEuMDQ0LTEuMjQ1IDEuNzYtMS44NjEuMTYyLS4xNC40MDktLjMyOC41OS0uNDczIDEuMjc4LTEuMDE4IDMuMDU3LS45MTIgMy45NzQuMjM4LjkxNyAxLjE1LjYyMiAyLjkwOC0uNjU1IDMuOTI4LS4xOC4xNDUtLjQxNi4zNDYtLjU4OC40NzMtLjc1OC41Ni0xLjQ1Ni44NDYtMi4yMTIgMS4yOS0xLjU5My45ODQtMi45MTMgMS44LTMuOTYxIDIuNzg0LS40OTQuNTMtLjQ1NyAxLjAzLS41IDEuNTA4LS4xNDguMTM2LS42Ny41OTgtLjk0Ni44NDhhMzQuNDc4IDM0LjQ3OCAwIDAgMSA0Ljk5IDExLjUzNyAzNC4zOTggMzQuMzk4IDAgMCAxIC41NiAxMi40MzVsMS4wNzMuMzEzYy4xOTQuMjc0LjU5Mi45NCAxLjE1IDEuMTU2IDEuMzcyLjQzMSAyLjkxNC41OSA0Ljc3Ni43ODUuODc1LjA3MyAxLjYyOC4wMyAyLjU1NS4yMDUuMjIyLjA0Mi41NDUuMTMuNzczLjE4MiAxLjU3LjM3OSAyLjU3OCAxLjgyMiAyLjI1NCAzLjI0NC0uMzI0IDEuNDIyLTEuODU3IDIuMjg2LTMuNDM3IDEuOTQ2bC0uMDQtLjAwNmMtLjAxNi0uMDA0LS4wMzMtLjAxMi0uMDUtLjAxNi0uMjIxLS4wNDgtLjQ5Ny0uMDk4LS42OS0uMTQ4LS45MS0uMjQ1LTEuNTctLjYxLTIuMzg4LS45MjItMS43NjMtLjYzMi0zLjIyNC0xLjE2LTQuNjQ3LTEuMzY2LS43Mi0uMDU4LTEuMDkuMjg3LTEuNDkuNTUxYTM5LjgzNSAzOS44MzUgMCAwIDAtMS4xMzktLjE5OWMtMi41NTIgOC4wMi03Ljk4NSAxNC45NjYtMTUuMzUzIDE5LjMxNy4xMjcuMzA2LjM0Mi45NTguNDQzIDEuMDc0LS4xNy40NDktLjQyMS44OC0uMjA1IDEuNTcyLjUxNyAxLjM0IDEuMzU0IDIuNjUyIDIuMzYzIDQuMjI5LjQ4OC43MjguOTg4IDEuMjg4IDEuNDI4IDIuMTIyLjEwNS4yLjI0NC41MDcuMzQ2LjcxNy42ODUgMS40NjUuMTgzIDMuMTUxLTEuMTMxIDMuNzg1LTEuMzI2LjYzOS0yLjk3NC0uMDM3LTMuNjg0LTEuNTEtLjEtLjIwOC0uMjQ0LS40ODUtLjMzLS42ODMtLjM3Ny0uODY0LS41MDctMS42MDQtLjc3My0yLjQ0LS42MDQtMS43NzItMS4xMDItMy4yNC0xLjgyNy00LjQ4LS40MDYtLjYtLjkwMy0uNjc2LTEuMzU5LS44MjQtLjA4NS0uMTQ2LS40LS43MjQtLjU3LTEuMDI0YTM0LjU2IDM0LjU2IDAgMCAxLTQuNTcgMS4zNzcgMzQuNDEzIDM0LjQxMyAwIDAgMS0yMC4wMS0xLjQ0bC0uNjA0IDEuMDljLS40NDkuMTItLjg4Mi4yNDQtMS4xNDguNTYxLS45NyAxLjE1Ny0xLjM1NiAzLjAxNi0yLjA2MSA0Ljc4Ni0uMjY1LjgzNi0uMzkzIDEuNTc3LS43NyAyLjQ0MS0uMDg2LjE5Ni0uMjI5LjQ2OC0uMzMuNjc2di4wMDhsLS4wMDYuMDA2Yy0uNzEgMS40NjgtMi4zNTIgMi4xMzktMy42NzUgMS41MDItMS4zMTUtLjYzMy0xLjgxOC0yLjMyLTEuMTMzLTMuNzg1LjEwMi0uMjExLjIzNi0uNTE3LjM0Mi0uNzE3LjQ0LS44MzQuOTQtMS4zOTggMS40MjctMi4xMjcgMS4wMDgtMS41NzggMS44OTUtMi45OTQgMi40MTMtNC4zMzQuMTMtLjQ0Ni0uMDYzLTEuMDU3LS4yMzctMS41MDhsLjQ4My0xLjE1OWMtNy4wOS00LjItMTIuNjg4LTEwLjg5Ny0xNS4zNi0xOS4xODFsLTEuMTYyLjE5OWMtLjMxLS4xNzQtLjkzNy0uNTg2LTEuNTMxLS41MzktMS40MjIuMjA2LTIuODguNzMzLTQuNjQzIDEuMzY1LS44Mi4zMTQtMS40OC42NzItMi4zOS45MTYtLjE5My4wNTItLjQ3LjEwNS0uNjkuMTU0LS4wMTcuMDA0LS4wMzQuMDE0LS4wNS4wMThsLS4wNC4wMDRjLTEuNTguMzQxLTMuMTEyLS41MjMtMy40MzctMS45NDUtLjMyNS0xLjQyMi42ODQtMi44NjUgMi4yNTQtMy4yNDVsLjAzOS0uMDExLjAyMS0uMDA2Yy4yMjQtLjA1Mi41MS0uMTI1LjcxMy0uMTY0LjkyNy0uMTc1IDEuNjgtLjEzMiAyLjU1NS0uMjA1IDEuODYyLS4xOTUgMy40MDUtLjM1NCA0Ljc3NS0uNzg1LjQzNC0uMTguODUtLjc3NSAxLjE0NS0xLjE1NWwxLjExNS0uMzI2Yy0xLjI1LTguNjU1Ljg2NC0xNy4xNSA1LjQzNC0yNC4wMjdsLS44NTItLjc2MmMtLjA1NS0uMzMzLS4xMjctMS4xMDEtLjUzNy0xLjUzNy0xLjA0Ny0uOTgzLTIuMzY2LTEuOC0zLjk1OS0yLjc4My0uNzU2LS40NDUtMS40NDktLjczMy0yLjIwOS0xLjI5My0uMTYtLjEyLS4zNzYtLjMtLjU1LS40NDRsLS4wNDItLjAyN2MtMS4yNzgtMS4wMTktMS41NzEtMi43NzgtLjY1NC0zLjkyOC41MTYtLjY0NyAxLjMwNC0uOTY3IDIuMTIzLS45NGEzLjE2OCAzLjE2OCAwIDAgMSAxLjg1NC43MDJjLjE4Mi4xNDMuNDMxLjMzMy41OTMuNDczLjcxNS42MTQgMS4xNSAxLjIyMSAxLjc1MiAxLjg1OSAxLjMxNCAxLjMzNCAyLjQgMi40NDIgMy41OTIgMy4yNDQuNjI2LjM2NCAxLjEwNy4yMTggMS41ODIuMTU0LjE1My4xMTMuNjY3LjQ4My45NjEuNjg0YTM0LjI2MiAzNC4yNjIgMCAwIDEgMTcuNDA0LTkuOTQzIDM0LjY2MyAzNC42NjMgMCAwIDEgNC44MTUtLjc0bC4wNjItMS4xMjhjLjM1NS0uMzQ0Ljc1My0uODM3Ljg2Ni0xLjM3Ny4xMTYtMS40My0uMDczLTIuOTc0LS4yOTctNC44MzItLjEyNC0uODY5LS4zMjktMS41ODgtLjM2NC0yLjUzLS4wMDctLjE5NC4wMDQtLjQ2Mi4wMDYtLjY4NCAwLS4wMjUtLjAwNi0uMDUtLjAwNi0uMDc1IDAtMS42MzQgMS4xOTMtMi45NTkgMi42NjMtMi45NTl6bS0zLjMzNCAyMC42NmEyOC4wNzYgMjguMDc2IDAgMCAwLTIuODQuNDg5IDI3LjQzOCAyNy40MzggMCAwIDAtMTMuMjE1IDcuMjAxbDExLjQ1NyA4LjEyMS4wMjEtLjAxMWEyLjMzNCAyLjMzNCAwIDAgMCAxLjM4My40NDkgMi4zNDggMi4zNDggMCAwIDAgMi4zNDYtMi4yNDhsLjA1Ny0uMDI4em02LjY3NSAwIC43OTEgMTMuOTUuMDEyLjAwNmEyLjM1IDIuMzUgMCAwIDAgMy43MzMgMS43OTNsLjA0LjAxNyAxMS4zODMtOC4wN2EyNy42NjggMjcuNjY4IDAgMCAwLTE1Ljk1OS03LjY5NVpNNDAuNDUyIDUxLjczYTI3LjQzMiAyNy40MzIgMCAwIDAtMy44OTIgMTcuMzY1bDEzLjQwOC0zLjg3LjAxMi0uMDQ2YTIuMzQ4IDIuMzQ4IDAgMCAwIDEuMjE3LS44MDMgMi4zNDUgMi4zNDUgMCAwIDAtLjI5NS0zLjIzMmwuMDEtLjA1N3ptNDcuMDE0LjAwOC0xMC40MDIgOS4zMDguMDA2LjAzYTIuMzI5IDIuMzI5IDAgMCAwLS43NDYgMS4yNDYgMi4zNSAyLjM1IDAgMCAwIDEuNjY4IDIuNzg5bC4wMTEuMDU2TDkxLjQ4IDY5LjA1YTI3LjcwMyAyNy43MDMgMCAwIDAtLjU4LTguOTMxIDI3Ljc3NCAyNy43NzQgMCAwIDAtMy40MzQtOC4zODFaTTYxLjg1MyA2MS44MWwtMi42NyAzLjMyNC45NTcgNC4xNTMgMy44NTcgMS44NTcgMy44NDgtMS44NS45NTctNC4xNTQtMi42NjQtMy4zM3ptMTMuNzM2IDExLjM5NWEyLjMzMyAyLjMzMyAwIDAgMC0uODk4LjIzMiAyLjM1MSAyLjM1MSAwIDAgMC0xLjEzOSAzLjA0NWwtLjAxNy4wMjNMNzguOTIgODkuNTFhMjcuNDY2IDI3LjQ2NiAwIDAgMCAxMS4xMDItMTMuOTVsLTEzLjg3MS0yLjM0NC0uMDIxLjAyOGEyLjI3NiAyLjI3NiAwIDAgMC0uNTQyLS4wNHptLTIzLjI5My4wNTZhMi4zNzggMi4zNzggMCAwIDAtLjQ2LjA0bC0uMDI0LS4wMjgtMTMuNzUgMi4zMzJhMjcuNTggMjcuNTggMCAwIDAgMTEuMDcgMTMuODU0bDUuMzI2LTEyLjg3My0uMDM5LS4wNTNhMi4zMjYgMi4zMjYgMCAwIDAgLjEzMS0xLjQ0NiAyLjM0OSAyLjM0OSAwIDAgMC0yLjI1NC0xLjgyNnptMTEuNjE2IDUuNjRhMi4zNTEgMi4zNTEgMCAwIDAtMS45ODcgMS4yNDFoLS4wMTJsLTYuNzYxIDEyLjIyNWEyNy41NDIgMjcuNTQyIDAgMCAwIDE1LjAzMS43NzMgMjguMDU2IDI4LjA1NiAwIDAgMCAyLjcxLS43NTZsLTYuNzgtMTIuMjQ4aC0uMDUxYTIuMzM3IDIuMzM3IDAgMCAwLTEuMDUzLTEuMDAyIDIuMzIgMi4zMiAwIDAgMC0xLjA5Ny0uMjMyeiIvPjwvc3ZnPgo=" x="973" y="64" width="14" height="14"/>
+      <text x="980" y="92" text-anchor="middle" fill="#3fb950" font-size="11" font-family="system-ui,sans-serif" font-weight="700">App Namespace</text>
+      <text x="980" y="108" text-anchor="middle" fill="#8b949e" font-size="10" font-family="system-ui,sans-serif">App</text>
+      <rect x="910" y="58" width="18" height="70" rx="5" fill="#3fb950" opacity="0.18"/>
+      <text x="919" y="97" text-anchor="middle" fill="#3fb950" font-size="9" font-family="system-ui,sans-serif" font-weight="700">6</text>
+
+      <!-- ── CAT approval label (below nodes, clear open space at x=890 y=145..162) ── -->
+      <rect x="847" y="133" width="86" height="15" rx="4" fill="#0a1f10" opacity="0.92"/>
+      <text x="890" y="145" text-anchor="middle" fill="#3fb950" font-size="10" font-family="system-ui,sans-serif" font-weight="700">✓ Approved</text>
+
+      <!-- ── CAT rejection path: node bottom=128, dip to y=168 ── -->
+      <!-- M 770,128 V 168 H 90 V 128 — length: 40+680+40=760 -->
+      <path d="M 770,128 V 168 H 90 V 128" fill="none" stroke="#30363d" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#n-ah-red)"/>
+      <path d="M 770,128 V 168 H 90 V 128" fill="none" stroke="#f85149" stroke-width="2" stroke-dasharray="8 752" stroke-dashoffset="760">
+        <animate attributeName="stroke-dashoffset" from="760" to="0" dur="4s" repeatCount="indefinite"/>
+      </path>
+      <text x="445" y="163" text-anchor="middle" fill="#f85149" font-size="8.5" font-family="system-ui,sans-serif" font-weight="600">✗ Rejected — revise &amp; resubmit</text>
+
+      <!-- ── Vertical: App Namespace ↔ OpenVAS (two symmetric parallel tracks) ── -->
+      <!-- x=977: down (purple). x=983: up (green). Length=116 -->
+      <line x1="977" y1="128" x2="977" y2="244" stroke="#30363d" stroke-width="1.5" marker-end="url(#n-ah-pur-up)"/>
+      <line x1="977" y1="128" x2="977" y2="244" stroke="#bc8cff" stroke-width="2" stroke-dasharray="8 108" stroke-dashoffset="116">
+        <animate attributeName="stroke-dashoffset" from="116" to="0" dur="1.4s" begin="0.8s" repeatCount="indefinite"/>
+      </line>
+      <line x1="983" y1="244" x2="983" y2="128" stroke="#30363d" stroke-width="1.5" marker-end="url(#n-ah-grn)"/>
+      <line x1="983" y1="244" x2="983" y2="128" stroke="#3fb950" stroke-width="2" stroke-dasharray="8 108" stroke-dashoffset="116">
+        <animate attributeName="stroke-dashoffset" from="116" to="0" dur="1.4s" begin="1.5s" repeatCount="indefinite"/>
+      </line>
+      <!-- ↓ Scans / ↑ Results: right of arrow tracks (x=977/983), open column to cluster right edge (x=1055) -->
+      <text x="990" y="168" text-anchor="start" fill="#bc8cff" font-size="10" font-family="system-ui,sans-serif" font-weight="600">↓ Scans</text>
+      <text x="990" y="218" text-anchor="start" fill="#3fb950" font-size="10" font-family="system-ui,sans-serif" font-weight="600">↑ Results</text>
+
+      <!-- ── New node: OpenVAS (y=244, h=62) ── -->
+      <rect x="910" y="244" width="140" height="62" rx="5" fill="#0d1f10" stroke="#3fb950" stroke-width="2"/>
+      <image href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDY2IiBoZWlnaHQ9IjQ4MCIgdmlld0JveD0iMCAwIDQ2NiA0ODAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGZpbGwtcnVsZT0iZXZlbm9kZCIgY2xpcC1ydWxlPSJldmVub2RkIiBkPSJNMjU0LjA1OCA5MEMyNTEuMDcxIDEwNC40MDEgMjQ0LjIyMSAxMzIuNDExIDI0MC4yMjQgMTQ4LjQxNkMyMTAuNzkzIDE2Ni4zNjQgMTczLjM2NCAyMDQuOTggMTUyLjg4IDIzMC43MjhDMTI5LjY2NCAyNTkuOTExIDgxLjc0NjQgMjk3LjU5NCA5MS4yMjQ4IDMxOS4zMjlDMTAyLjEwMiAzNDQuMjcxIDExOS4wMTMgMzU3LjU1OCAxNDMuMjM4IDM2OC45QzE1MS44MDQgMzM3LjU0MyAyMTEuOTUgMzE3LjY4MiAyMjkuNzkyIDMwNS4wMzhDMjMzLjgyNyAzMDIuMTc5IDIzNi44MjUgMjk5LjU1MiAyMzguNjI5IDI5NC43MkMyNDAuNDMzIDI4OS44ODggMjI4LjA3NyAyNzUuNDA0IDIzMi44MDMgMjYzLjMxQzIzNy45NDEgMjUwLjE2MyAyNTQuNDk2IDIzNC4zNDYgMjcxLjYyMyAyMzQuMzQ2QzI1Ny45MjIgMjM4LjE1OSAyNDUuMzYyIDI1NC4xNjUgMjQzLjY1IDI2NS4wMjVDMjQxLjcwMyAyNzcuMzY4IDI2MC4zNDIgMjkxLjcyNiAyNTMuMDk0IDMwMy44MDVDMjUxLjQ4NyAzMDYuMzgxIDI0OC4xMjkgMzEwLjI4MiAyNDQuNjM1IDMxMy4wNTdDMjIxLjkxNSAzMzEuMDk3IDE2NC44NjggMzQ5LjYyNCAxNjAuODA1IDM3MC43OTFDMTcwLjM1MSAzNzkuOTA1IDIwMi4zNjEgMzk1LjAwNCAyMTIuNjI4IDM4OC4zNkMyNTUuNDQyIDM2MC42NTggMzgzLjUxNSAzMDAuNDY1IDMwMC43MzggMjM0LjM0NkMzMzIuNzA3IDIzOC4zNDggMzQ2LjM0NSAyNjQuNjEyIDM0Ny41NSAyOTMuMDM0QzM3My43NDggMjc2LjA0NSAzODEuNDU1IDI0OS40ODcgMzcxLjUyNyAyMjYuOTA2QzM1Ny43MDQgMTk1LjQ2NyAzMzQuOTY2IDE2Ni43MDcgMzAwLjczOCAxNDguNDE2QzI5Ni43NDIgMTI0Ljk4IDI4MC43NTcgMTAxLjU0MyAyNTQuMDU4IDkwWk0xMjAuNDAyIDI5My44NzJDMTIyLjM0OCAyOTMuMzkyIDEyNC4yNzMgMzA3LjQ3NiAxMjEuNDgxIDMxMC4wNUMxMTkuMDQ4IDMxMi4yOTUgMTA5LjY1MSAzMTIuODE0IDEwNy44NDMgMzExLjA0M0MxMDYuMDIzIDMwOS4yNTkgMTE2LjczNyAyOTQuNzc1IDEyMC40MDIgMjkzLjg3MlpNMjE2LjI5OCAyMDEuMTQ5QzIyMS4wOTggMTk5LjM5MiAyMjYuNjE2IDIwNi4yNjEgMjI3LjY2NSAyMTEuMjkzQzIyOC44NzcgMjE3LjEwNyAyMjIuOTY0IDIyNC4zMzYgMjIwLjgxNSAyMjYuNzI3QzIxOS4yNzMgMjI4LjQ0MiAyMDguODI2IDI0My44NzYgMTg5LjQ2NyAyMzQuMzQ2QzE4NC4yNzggMjMxLjc5MiAyMDQuMjU5IDIwNS41NTkgMjE2LjI5OCAyMDEuMTQ5WiIgZmlsbD0iIzBFODIzRSIvPgo8cGF0aCBkPSJNMTkxLjcgMTA1LjU0NUMyMDAuNTAzIDEwOS4zODcgMjIyLjg5NiAxMjMuMjE4IDIyOS4xMzYgMTQwLjc0MUMyMTQuODI0IDE1MC4wODggMTk5LjI0IDE2My4zODYgMTg0LjY3NyAxNzcuNDU1QzE4Ny45MDQgMTUyLjk1NSAxOTAuNDc3IDExOS43MTIgMTkxLjcgMTA1LjU0NVoiIGZpbGw9IiMwRTgyM0UiLz4KPC9zdmc+Cg==" x="973" y="249" width="14" height="14"/>
+      <text x="980" y="277" text-anchor="middle" fill="#3fb950" font-size="11" font-family="system-ui,sans-serif" font-weight="700">OpenVAS</text>
+      <text x="980" y="293" text-anchor="middle" fill="#8b949e" font-size="10" font-family="system-ui,sans-serif">Vulnerability Scanner</text>
+      <rect x="910" y="244" width="18" height="62" rx="5" fill="#3fb950" opacity="0.2"/>
+      <text x="919" y="279" text-anchor="middle" fill="#3fb950" font-size="9" font-family="system-ui,sans-serif" font-weight="700">7</text>
+      <rect x="966" y="234" width="30" height="13" rx="3" fill="#3fb950" opacity="0.9"/>
+      <text x="981" y="244" text-anchor="middle" fill="#fff" font-size="8" font-family="system-ui,sans-serif" font-weight="700">NEW</text>
+
+      <!-- ── L-path: OpenVAS → CAT (green, reports) — exits OpenVAS low (y=290) ── -->
+      <!-- M 910,290 H 800 V 128. Length=(910-800)+(290-128)=110+162=272 -->
+      <path d="M 910,290 H 800 V 128" fill="none" stroke="#30363d" stroke-width="1.5" marker-end="url(#n-ah-grn)"/>
+      <path d="M 910,290 H 800 V 128" fill="none" stroke="#3fb950" stroke-width="2" stroke-dasharray="9 263" stroke-dashoffset="272">
+        <animate attributeName="stroke-dashoffset" from="272" to="0" dur="2.1s" repeatCount="indefinite"/>
+      </path>
+
+      <!-- ── L-path return: CAT → OpenVAS (orange, triggers) — arrives OpenVAS high (y=260) ── -->
+      <!-- M 830,128 V 260 H 910. Length=(260-128)+(910-830)=132+80=212 -->
+      <path d="M 830,128 V 260 H 910" fill="none" stroke="#30363d" stroke-width="1.5" marker-end="url(#n-ah-orng)"/>
+      <path d="M 830,128 V 260 H 910" fill="none" stroke="#f78166" stroke-width="2" stroke-dasharray="9 203" stroke-dashoffset="212">
+        <animate attributeName="stroke-dashoffset" from="212" to="0" dur="1.7s" begin="1s" repeatCount="indefinite"/>
+      </path>
+
+      <!-- Reports / Triggers: between the two horizontal segments (y=260 and y=290) -->
+      <text x="870" y="268" text-anchor="middle" fill="#f78166" font-size="10" font-family="system-ui,sans-serif" font-weight="600">→ Triggers</text>
+      <text x="855" y="284" text-anchor="middle" fill="#3fb950" font-size="10" font-family="system-ui,sans-serif" font-weight="600">← Reports</text>
+    </svg>
+  </div>
+
+  <div class="cards-row">
+    <div class="cards-col">
+      <div class="cards-label">Current Workflow</div>
+      <div class="cards">
+        <div class="card">
+          <div class="badge badge-existing">Packaging</div>
+          <div class="card-title">Zarf Package</div>
+          <div class="card-body">Container image and Helm chart are bundled into a Zarf package for airgapped delivery into classified environments.</div>
+        </div>
+        <div class="card">
+          <div class="badge badge-existing">Static Scanning</div>
+          <div class="card-title">Trivy · Grype · ClamAV · OpenSCAP</div>
+          <div class="card-body">CVE scanning on container layers, malware checks, and OS-level compliance audits run against the Zarf package before deployment.</div>
+        </div>
+        <div class="card">
+          <div class="badge badge-existing">Compliance</div>
+          <div class="card-title">CAT Review</div>
+          <div class="card-body">An ISSM reviews the static scan report inside the Compliance Authorization Tool and grants an ATO before deployment proceeds.</div>
+        </div>
+        <div class="card">
+          <div class="badge badge-existing">Runtime</div>
+          <div class="card-title">K8s Production</div>
+          <div class="card-body">Once approved the package runs in the production cluster. No live infrastructure scanning occurs under the current workflow.</div>
+        </div>
+      </div>
+    </div>
+    <div class="cards-col">
+      <div class="cards-label">What's New</div>
+      <div class="cards">
+        <div class="card">
+          <div class="badge badge-new">New</div>
+          <div class="card-title">OpenVAS on Kubernetes</div>
+          <div class="card-body">Greenbone Community Edition runs inside the production cluster and continuously scans the underlying node infrastructure for open ports, running services, and CVEs.</div>
+        </div>
+        <div class="card">
+          <div class="badge badge-new">New</div>
+          <div class="card-title">Bidirectional CAT Integration</div>
+          <div class="card-body">OpenVAS pushes live scan results into the CAT tool. The CAT tool can trigger new scans on demand via the OpenVAS REST API, creating a continuous feedback loop.</div>
+        </div>
+        <div class="card">
+          <div class="badge badge-enhanced">Enhanced</div>
+          <div class="card-title">Runtime Posture Review</div>
+          <div class="card-body">ISSMs can now validate the live cluster security posture — open ports, running services, exposed interfaces — against what was approved at ATO time.</div>
+        </div>
+        <div class="card">
+          <div class="badge badge-new">New</div>
+          <div class="card-title">OpenVAS REST API</div>
+          <div class="card-body">A FastAPI wrapper exposes GVM over HTTPS inside UDS. Targets, scans, and reports are accessible via standard JSON endpoints, ready for CAT tool integration.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div><!-- /.workflow-layout -->
+</body>
+</html>
