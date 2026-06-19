@@ -1,6 +1,16 @@
 imageRegistry: registry.community.greenbone.net/community
 feedRelease: "24.10"
 
+# Scheduled OpenVAS scan -> DefectDojo upload CronJob. Reads its API token from
+# the `defectdojo-token` Secret (key: token) that you create in the greenbone
+# namespace, e.g.:
+#   kubectl -n greenbone create secret generic defectdojo-token \
+#     --from-literal=token='<DEFECTDOJO_API_TOKEN>'
+# Defaults self-scan 127.0.0.1; set defectdojo.scan.targetHosts for real targets.
+defectdojo:
+  enabled: true
+  existingSecret: defectdojo-token
+
 images:
   vulnerabilityTests:
     repository: vulnerability-tests

@@ -15,6 +15,11 @@ network:
       gateway: tenant
       host: openvas-api
   allowScannerEgress: false
+  # Egress allow for the scheduled DefectDojo upload CronJob (greenbone chart's
+  # `defectdojo.enabled`). Scoped to that pod via component label; enabled by
+  # default since it only takes effect when the CronJob pod exists.
+  defectdojoUpload:
+    allowEgress: true
 
 exemptions:
   enabled: true

@@ -38,3 +38,12 @@ spec:
         remoteGenerated: Anywhere
         description: Allow Greenbone scanner traffic to configured scan targets
       {{- end }}
+      {{- if .Values.network.defectdojoUpload.allowEgress }}
+      # Scoped to the scheduled scan -> DefectDojo upload CronJob only. Harmless if
+      # the CronJob is disabled (no pod carries this component label to match).
+      - direction: Egress
+        remoteGenerated: Anywhere
+        description: Allow the DefectDojo upload CronJob to reach DefectDojo
+        selector:
+          app.kubernetes.io/component: defectdojo-upload
+      {{- end }}
