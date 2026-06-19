@@ -95,6 +95,19 @@ tasks:
           # duplicate target name and the API has no delete endpoint to clean up afterward.
           RUN_ID="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || date +%s)"
 
+          # Wait for gvmd to finish loading NVTs and creating the default scan configs.
+          # Until then, POST /scans fails with "No scan configs available in GVM". We poll
+          # GET /scan-configs (the same query the scan creation uses) until it's non-empty --
+          # the API-native equivalent of gvmd's "manage_discovery_nvts: Updating Discovery
+          # NVTs done" log line. This also covers the openvas-api ingress still coming up.
+          ready=
+          for i in $(seq 1 120); do
+            N="$(curl -fsS "$API/scan-configs" 2>/dev/null | uds zarf tools yq 'length' 2>/dev/null)"
+            case "$N" in ''|0|null) echo "waiting for gvmd to load NVTs / scan configs..."; sleep 10 ;; *) ready=1; break ;; esac
+          done
+          [ -n "$ready" ] || { echo "gvmd scan configs did not load within the timeout"; exit 1; }
+          echo "gvmd is feed-ready (${N} scan configs)"
+
           # 127.0.0.1 = the greenbone pod the scanner (ospd) runs in, so this self-scans
           # the pod's own listeners. Retried: covers the openvas-api ingress still coming
           # up AND the default port list (a feed object) still importing after deploy.
