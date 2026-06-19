@@ -126,8 +126,9 @@ tasks:
           SCAN="$(curl -fsS -X POST "$API/scans" -H 'Content-Type: application/json' \
             -d "{\"name\":\"this-pod scan ${RUN_ID}\",\"target_id\":\"${TARGET_ID}\"}")"
           TASK_ID="$(printf '%s' "$SCAN" | uds zarf tools yq '.task_id')"
+          REPORT_ID="$(printf '%s' "$SCAN" | uds zarf tools yq '.report_id')"
           [ -n "$TASK_ID" ] || { echo "failed to start scan"; exit 1; }
-          echo "Task ID: $TASK_ID"
+          echo "Task ID: $TASK_ID  Report ID: $REPORT_ID"
 
           # Poll until the scan is Done (bounded ~30 min so CI can't hang).
           done_ok=
@@ -142,5 +143,14 @@ tasks:
           [ -n "$done_ok" ] || { echo "scan did not complete within the timeout"; exit 1; }
           echo "Scan complete"
 
-          # Print the results.
-          curl -fsS "$API/results?task_id=${TASK_ID}" | uds zarf tools yq -P '.'
+          # Write the scan outputs to files. The OpenVAS XML report (openvas-report.xml) is
+          # the format DefectDojo's "OpenVAS Parser" ingests -- upload it out-of-band with
+          # scripts/upload-to-defectdojo.py (DefectDojo is intentionally not in the bundle).
+          # The parsed results JSON is also saved for quick inspection. Paths are overridable
+          # via SCAN_REPORT_FILE / SCAN_RESULTS_FILE.
+          REPORT_FILE="${SCAN_REPORT_FILE:-openvas-report.xml}"
+          RESULTS_FILE="${SCAN_RESULTS_FILE:-openvas-results.json}"
+          curl -fsS "$API/reports/${REPORT_ID}/xml" -o "$REPORT_FILE"
+          curl -fsS "$API/results?task_id=${TASK_ID}" -o "$RESULTS_FILE"
+          echo "wrote ${REPORT_FILE} ($(wc -c <"$REPORT_FILE") bytes) and ${RESULTS_FILE}"
+          uds zarf tools yq -P '.' < "$RESULTS_FILE"
