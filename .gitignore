@@ -3,4 +3,9 @@ zarf-package-*.tar.zst
 openvas-api.tar
 bundle/*.tar.zst
 
+# Scan outputs written by the api-scan test task
+openvas-report.xml
+openvas-results.json
+
 .claude
+venv

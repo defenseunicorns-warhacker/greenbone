@@ -1,7 +1,9 @@
 from xml.etree.ElementTree import Element
 
 from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi.responses import Response
 from gvm.protocols.gmp import Gmp
+from lxml import etree
 from pydantic import BaseModel, Field
 
 from gmp import GVM_ERRORS, gmp_session
@@ -155,6 +157,36 @@ def get_report(report_id: str = _REPORT_PATH) -> Report:
         severity=r.findtext(".//severity/full", "-"),
         hosts_count=int(r.findtext(".//hosts/count", "0") or 0),
     )
+
+
+# Built-in "XML" report format -- the OpenVAS XML that DefectDojo's "OpenVAS Parser" ingests.
+_XML_REPORT_FORMAT_ID = "a994b278-1f62-11e1-96ac-406186ea4fc5"
+
+
+@router.get(
+    "/reports/{report_id}/xml",
+    summary="Download a report as OpenVAS XML",
+    response_description="The report in GVM's built-in XML report format",
+    responses={**_ERRORS, 200: {"content": {"application/xml": {}}}},
+)
+def get_report_xml(report_id: str = _REPORT_PATH) -> Response:
+    """Return the raw OpenVAS XML report (GVM's built-in 'XML' report format).
+
+    Intended for tools that ingest the OpenVAS XML report directly -- e.g.
+    DefectDojo's 'OpenVAS Parser' via `POST /api/v2/reimport-scan/`. The inner
+    `<report>` element is returned (unwrapped from the GMP response envelope).
+    """
+    with gmp_session() as gmp:
+        response = gmp.get_report(
+            report_id=report_id,
+            report_format_id=_XML_REPORT_FORMAT_ID,
+            ignore_pagination=True,
+            details=True,
+        )
+    inner = response.find("report")
+    if inner is None:
+        raise HTTPException(404, detail=f"Report {report_id} not found")
+    return Response(content=etree.tostring(inner), media_type="application/xml")
 
 
 @router.get(
