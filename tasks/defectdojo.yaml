@@ -8,8 +8,72 @@
 # without waiting for the schedule. Requires kubectl + a kubeconfig pointed
 # at the cluster.
 tasks:
+  - name: bootstrap-token
+    description: Mint a DefectDojo API token from its admin creds and store it as the greenbone-side Secret (idempotent)
+    inputs:
+      namespace:
+        description: Namespace where Greenbone is deployed (where the token Secret lives)
+        default: greenbone
+      secret:
+        description: Name of the token Secret to create (must match defectdojo.existingSecret)
+        default: defectdojo-token
+      key:
+        description: Key within the token Secret (must match defectdojo.tokenKey)
+        default: token
+      ddNamespace:
+        description: Namespace where DefectDojo is deployed
+        default: defectdojo
+      ddAdminSecret:
+        description: DefectDojo admin Secret holding DD_ADMIN_PASSWORD
+        default: defectdojo
+      ddUrl:
+        description: DefectDojo base URL (reachable from where you run this task)
+        default: https://defectdojo.uds.dev
+      ddUser:
+        description: DefectDojo admin username
+        default: admin
+    actions:
+      - description: Create the token Secret if it does not already exist
+        cmd: |
+          NS="${{ .inputs.namespace }}"
+          SECRET="${{ .inputs.secret }}"
+          KEY="${{ .inputs.key }}"
+          if kubectl -n "${NS}" get secret "${SECRET}" >/dev/null 2>&1; then
+            echo "==> token Secret ${NS}/${SECRET} already exists; leaving it as-is"
+            echo "    (delete it first if you want to re-mint: kubectl -n ${NS} delete secret ${SECRET})"
+            exit 0
+          fi
+
+          DDNS="${{ .inputs.ddNamespace }}"
+          DDSEC="${{ .inputs.ddAdminSecret }}"
+          DD_URL="${{ .inputs.ddUrl }}"
+          DD_USER="${{ .inputs.ddUser }}"
+
+          echo "==> reading DefectDojo admin password from ${DDNS}/${DDSEC}"
+          DD_PASS="$(kubectl -n "${DDNS}" get secret "${DDSEC}" \
+            -o jsonpath='{.data.DD_ADMIN_PASSWORD}' | base64 -d)"
+          if [ -z "${DD_PASS}" ]; then
+            echo "error: could not read DD_ADMIN_PASSWORD from ${DDNS}/${DDSEC}" >&2
+            exit 1
+          fi
+
+          echo "==> requesting an API token from ${DD_URL}"
+          TOKEN="$(curl -sk -X POST "${DD_URL}/api/v2/api-token-auth/" \
+            -H 'Content-Type: application/json' \
+            -d "{\"username\":\"${DD_USER}\",\"password\":\"${DD_PASS}\"}" \
+            | sed -E 's/.*"token":"([^"]+)".*/\1/')"
+          # A valid token is a single opaque string; anything with JSON/braces/spaces is an error body.
+          case "${TOKEN}" in
+            ""|*"{"*|*"}"*|*" "*)
+              echo "error: failed to obtain an API token from ${DD_URL} (check the URL/credentials)" >&2
+              exit 1 ;;
+          esac
+
+          kubectl -n "${NS}" create secret generic "${SECRET}" --from-literal="${KEY}=${TOKEN}"
+          echo "==> created token Secret ${NS}/${SECRET}"
+
   - name: run
-    description: Trigger an on-demand scan + DefectDojo upload (creates a Job from the CronJob and follows it)
+    description: Mint the DefectDojo token if needed, then trigger an on-demand scan + upload and follow it
     inputs:
       namespace:
         description: Namespace where Greenbone is deployed
@@ -18,6 +82,10 @@ tasks:
         description: Name of the DefectDojo upload CronJob
         default: greenbone-community-defectdojo
     actions:
+      - description: Ensure the DefectDojo token Secret exists
+        task: bootstrap-token
+        with:
+          namespace: ${{ .inputs.namespace }}
       - description: Create a one-off Job from the CronJob and stream its logs to completion
         cmd: |
           NS="${{ .inputs.namespace }}"
