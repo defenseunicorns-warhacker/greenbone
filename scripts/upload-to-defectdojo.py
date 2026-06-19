@@ -11,6 +11,10 @@ Unlike the original gvm-script version, this does not talk to gvmd -- the test a
 runs the scan and exports the report -- it only POSTs the file to DefectDojo's
 reimport-scan endpoint (auto-creating the product/engagement if they don't exist).
 
+For an in-cluster, scheduled version of this whole flow (scan via openvas-api +
+upload), enable the greenbone chart's `defectdojo.enabled` CronJob; see
+docs/configuration.md ("Scheduled DefectDojo upload") and `uds run defectdojo:run`.
+
 Usage:
     DEFECTDOJO_TOKEN=<token> python scripts/upload-to-defectdojo.py [report.xml]
 

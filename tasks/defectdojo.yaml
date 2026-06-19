@@ -1,0 +1,49 @@
+# Copyright 2024 Defense Unicorns
+# SPDX-License-Identifier: AGPL-3.0-or-later OR LicenseRef-Defense-Unicorns-Commercial
+# yaml-language-server: $schema=https://raw.githubusercontent.com/defenseunicorns/uds-cli/refs/heads/main/tasks.schema.json
+
+# On-demand control for the scheduled OpenVAS scan -> DefectDojo upload.
+# The CronJob itself is rendered by the greenbone chart when
+# `defectdojo.enabled=true`. These tasks let you trigger and inspect runs
+# without waiting for the schedule. Requires kubectl + a kubeconfig pointed
+# at the cluster.
+tasks:
+  - name: run
+    description: Trigger an on-demand scan + DefectDojo upload (creates a Job from the CronJob and follows it)
+    inputs:
+      namespace:
+        description: Namespace where Greenbone is deployed
+        default: greenbone
+      cronjob:
+        description: Name of the DefectDojo upload CronJob
+        default: greenbone-community-defectdojo
+    actions:
+      - description: Create a one-off Job from the CronJob and stream its logs to completion
+        cmd: |
+          NS="${{ .inputs.namespace }}"
+          CJ="${{ .inputs.cronjob }}"
+          JOB="${CJ}-manual-$(date +%s)"
+          kubectl create job --from="cronjob/${CJ}" "${JOB}" -n "${NS}"
+          echo "created job ${JOB} (namespace ${NS})"
+          echo "waiting for pod to start..."
+          kubectl wait --for=condition=Ready pod -l job-name="${JOB}" -n "${NS}" --timeout=180s || true
+          kubectl logs -f "job/${JOB}" -n "${NS}" || true
+          # Surface the real outcome as this task's exit status.
+          kubectl wait --for=condition=complete "job/${JOB}" -n "${NS}" --timeout=5400s
+
+  - name: logs
+    description: Show logs from the most recent DefectDojo upload Job
+    inputs:
+      namespace:
+        description: Namespace where Greenbone is deployed
+        default: greenbone
+    actions:
+      - cmd: |
+          NS="${{ .inputs.namespace }}"
+          POD="$(kubectl get pods -n "${NS}" \
+            -l app.kubernetes.io/component=defectdojo-upload \
+            --sort-by=.metadata.creationTimestamp \
+            -o jsonpath='{.items[-1:].metadata.name}')"
+          if [ -z "${POD}" ]; then echo "no defectdojo-upload pods found in ${NS}"; exit 1; fi
+          echo "==> logs for ${POD}"
+          kubectl logs "${POD}" -n "${NS}"

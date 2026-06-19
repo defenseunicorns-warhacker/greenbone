@@ -107,6 +107,51 @@ images:
 For production-grade reproducibility, replace moving tags with immutable image digests or a
 validated internal mirror policy before release.
 
+## Scheduled DefectDojo upload
+
+The chart can run the full scan-and-report pipeline on a schedule, entirely in-cluster.
+When `defectdojo.enabled=true` a CronJob (`greenbone-community-defectdojo`) runs the same
+end-to-end flow as `uds run test:api-scan` + `scripts/upload-to-defectdojo.py`: it drives
+the `openvas-api` to create a target, run a *Full and fast* scan, waits for completion,
+fetches the OpenVAS XML report, and POSTs it to DefectDojo's `reimport-scan` endpoint
+(auto-creating the product/engagement). It uses only `curl` + a POSIX shell — no Python and
+no custom image.
+
+DefectDojo is intentionally **not** part of this bundle. Point `defectdojo.url` at a
+reachable instance and provide an API v2 token:
+
+```yaml
+defectdojo:
+  enabled: true
+  schedule: "0 2 * * *"          # daily at 02:00 (cluster timezone)
+  url: https://defectdojo.uds.dev
+  product: Greenbone
+  engagement: OpenVAS Scan
+  verifyTls: false               # *.uds.dev uses a dev CA
+  token: ""                      # creates a Secret; or use existingSecret/tokenKey
+  scan:
+    targetHosts: "127.0.0.1"     # set to real targets for a useful scan
+```
+
+Provide the token either inline (`defectdojo.token`, which creates a Secret) or by
+referencing a Secret you manage:
+
+```yaml
+defectdojo:
+  existingSecret: my-defectdojo-token
+  tokenKey: token
+```
+
+The CronJob pod needs egress to DefectDojo; this is allowed via a UDS network policy scoped
+to the upload pod (`network.defectdojoUpload.allowEgress`, on by default in the config chart).
+
+Trigger an off-schedule run and follow it (requires `kubectl`):
+
+```bash
+uds run defectdojo:run        # creates a Job from the CronJob and streams logs
+uds run defectdojo:logs       # logs from the most recent upload run
+```
+
 ## Upstream Documentation
 
 Read the upstream documentation for application behavior and lifecycle operations:

@@ -1,0 +1,231 @@
+{{- /*
+Scheduled OpenVAS scan -> DefectDojo upload.
+
+End-to-end replacement for the manual `uds run test:api-scan` +
+`scripts/upload-to-defectdojo.py` flow, run on a schedule inside the cluster:
+
+  1. wait for gvmd to be feed-ready (scan configs loaded),
+  2. create a target and start a "Full and fast" scan via the openvas-api,
+  3. poll until the scan is Done,
+  4. fetch the OpenVAS XML report,
+  5. POST it to DefectDojo's reimport-scan endpoint (auto-creating context).
+
+Everything runs with curl + a POSIX shell (no Python / no custom image), so the
+only image needed is `defectdojo.image` (added to the Zarf package). DefectDojo
+is intentionally not part of this bundle; point `defectdojo.url` at a reachable
+instance and provide an API token.
+*/}}
+{{- define "greenbone.defectdojo.labels" -}}
+{{ include "greenbone.selectorLabels" . }}
+app.kubernetes.io/component: defectdojo-upload
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+{{- end -}}
+{{- if .Values.defectdojo.enabled }}
+{{- $fullname := include "greenbone.fullname" . }}
+{{- $name := printf "%s-defectdojo" $fullname }}
+{{- $ddSecret := .Values.defectdojo.existingSecret | default $name }}
+{{- $ddKey := .Values.defectdojo.tokenKey | default "token" }}
+{{- if and .Values.defectdojo.token (not .Values.defectdojo.existingSecret) }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "greenbone.defectdojo.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  {{ $ddKey }}: {{ .Values.defectdojo.token | quote }}
+---
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-script
+  labels:
+    {{- include "greenbone.defectdojo.labels" . | nindent 4 }}
+data:
+  scan-and-upload.sh: |
+    #!/bin/sh
+    # Scan via openvas-api, then reimport the OpenVAS XML report into DefectDojo.
+    # All inputs come from env vars (see the CronJob spec). Parses the small flat
+    # JSON responses with grep/sed so no jq is required.
+    API="${OPENVAS_API_URL:-http://openvas-api.greenbone.svc.cluster.local}"
+    DD_URL="${DEFECTDOJO_URL:-https://defectdojo.uds.dev}"
+    DD_URL="${DD_URL%/}"
+    TARGET_HOSTS="${SCAN_TARGET_HOSTS:-127.0.0.1}"
+    SCAN_TYPE="OpenVAS Parser"
+    REPORT_FILE="/tmp/openvas-report.xml"
+    POLL_ATTEMPTS="${SCAN_POLL_ATTEMPTS:-60}"
+    POLL_INTERVAL="${SCAN_POLL_INTERVAL:-30}"
+
+    if [ "${DEFECTDOJO_VERIFY_TLS:-false}" = "true" ]; then DD_INSECURE=""; else DD_INSECURE="-k"; fi
+    if [ -z "${DEFECTDOJO_TOKEN:-}" ]; then echo "error: DEFECTDOJO_TOKEN is required" >&2; exit 2; fi
+
+    # Extract a flat JSON string / number field by name from stdin.
+    jstr() { grep -oE "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -n1 | sed -E "s/.*:[[:space:]]*\"([^\"]*)\"/\1/"; }
+    jnum() { grep -oE "\"$1\"[[:space:]]*:[[:space:]]*-?[0-9]+" | head -n1 | sed -E "s/.*:[[:space:]]*(-?[0-9]+)/\1/"; }
+
+    RUN_ID="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || date +%s)"
+
+    # 1. Wait for gvmd to finish loading NVTs / default scan configs.
+    echo "==> waiting for gvmd scan configs to load..."
+    ready=
+    i=0
+    while [ "$i" -lt 120 ]; do
+      i=$((i + 1))
+      if curl -fsS "$API/scan-configs" 2>/dev/null | grep -q '"id"'; then ready=1; break; fi
+      echo "    ...not ready yet (attempt $i)"
+      sleep 10
+    done
+    if [ -z "$ready" ]; then echo "gvmd scan configs did not load in time" >&2; exit 1; fi
+    echo "    gvmd is feed-ready"
+
+    # 2. Create the target. Retried while the api/feed objects finish coming up.
+    echo "==> creating target for hosts: $TARGET_HOSTS"
+    TARGET=
+    i=0
+    while [ "$i" -lt 60 ]; do
+      i=$((i + 1))
+      TARGET="$(curl -fsS -X POST "$API/targets" -H 'Content-Type: application/json' \
+        -d "{\"name\":\"cronjob-${RUN_ID}\",\"hosts\":\"${TARGET_HOSTS}\"}" 2>/dev/null || true)"
+      if [ -n "$TARGET" ]; then break; fi
+      echo "    ...waiting for openvas-api + feed objects (attempt $i)"
+      sleep 5
+    done
+    if [ -z "$TARGET" ]; then echo "failed to create target" >&2; exit 1; fi
+    TARGET_ID="$(printf '%s' "$TARGET" | jstr id)"
+    echo "    target id: $TARGET_ID"
+
+    # 3. Create and start the scan (default 'Full and fast' config).
+    echo "==> starting scan"
+    SCAN="$(curl -fsS -X POST "$API/scans" -H 'Content-Type: application/json' \
+      -d "{\"name\":\"cronjob scan ${RUN_ID}\",\"target_id\":\"${TARGET_ID}\"}")"
+    TASK_ID="$(printf '%s' "$SCAN" | jstr task_id)"
+    REPORT_ID="$(printf '%s' "$SCAN" | jstr report_id)"
+    if [ -z "$TASK_ID" ]; then echo "failed to start scan" >&2; exit 1; fi
+    echo "    task id: $TASK_ID  report id: $REPORT_ID"
+
+    # 4. Poll until the scan is Done (bounded by POLL_ATTEMPTS * POLL_INTERVAL).
+    echo "==> waiting for scan to complete"
+    done_ok=
+    i=0
+    while [ "$i" -lt "$POLL_ATTEMPTS" ]; do
+      i=$((i + 1))
+      RESP="$(curl -fsS "$API/scans/${TASK_ID}" 2>/dev/null || true)"
+      STATE="$(printf '%s' "$RESP" | jstr status)"
+      PROG="$(printf '%s' "$RESP" | jnum progress)"
+      echo "    status=${STATE} progress=${PROG}"
+      if [ "$STATE" = "Done" ]; then done_ok=1; break; fi
+      sleep "$POLL_INTERVAL"
+    done
+    if [ -z "$done_ok" ]; then echo "scan did not complete in time" >&2; exit 1; fi
+    echo "    scan complete"
+
+    # 5. Fetch the OpenVAS XML report (the format DefectDojo's OpenVAS Parser ingests).
+    echo "==> fetching report"
+    curl -fsS "$API/reports/${REPORT_ID}/xml" -o "$REPORT_FILE"
+    echo "    wrote $REPORT_FILE ($(wc -c < "$REPORT_FILE") bytes)"
+
+    # 6. Reimport into DefectDojo (auto-creates the product/engagement if missing).
+    echo "==> uploading to DefectDojo at $DD_URL"
+    HTTP="$(curl $DD_INSECURE -sS -w '%{http_code}' -o /tmp/dd-response.txt \
+      -X POST "$DD_URL/api/v2/reimport-scan/" \
+      -H "Authorization: Token ${DEFECTDOJO_TOKEN}" \
+      -F "scan_type=${SCAN_TYPE}" \
+      -F "product_name=${DEFECTDOJO_PRODUCT:-Greenbone}" \
+      -F "product_type_name=${DEFECTDOJO_PRODUCT_TYPE:-Greenbone}" \
+      -F "engagement_name=${DEFECTDOJO_ENGAGEMENT:-OpenVAS Scan}" \
+      -F "auto_create_context=true" \
+      -F "active=true" \
+      -F "verified=false" \
+      -F "minimum_severity=Low" \
+      -F "file=@${REPORT_FILE};type=text/xml;filename=openvas.xml")"
+    echo "    DefectDojo reimport: HTTP $HTTP"
+    cat /tmp/dd-response.txt 2>/dev/null || true
+    echo
+    case "$HTTP" in
+      2*) echo "==> done" ;;
+      *) echo "DefectDojo upload failed (HTTP $HTTP)" >&2; exit 1 ;;
+    esac
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "greenbone.defectdojo.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.defectdojo.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.defectdojo.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.defectdojo.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.defectdojo.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.defectdojo.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "greenbone.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: defectdojo-upload
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: scan-and-upload
+              image: {{ .Values.defectdojo.image | quote }}
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "/scripts/scan-and-upload.sh"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: OPENVAS_API_URL
+                  value: {{ .Values.defectdojo.openvasApiUrl | quote }}
+                - name: DEFECTDOJO_URL
+                  value: {{ .Values.defectdojo.url | quote }}
+                - name: DEFECTDOJO_PRODUCT
+                  value: {{ .Values.defectdojo.product | quote }}
+                - name: DEFECTDOJO_PRODUCT_TYPE
+                  value: {{ .Values.defectdojo.productType | quote }}
+                - name: DEFECTDOJO_ENGAGEMENT
+                  value: {{ .Values.defectdojo.engagement | quote }}
+                - name: DEFECTDOJO_VERIFY_TLS
+                  value: {{ .Values.defectdojo.verifyTls | quote }}
+                - name: SCAN_TARGET_HOSTS
+                  value: {{ .Values.defectdojo.scan.targetHosts | quote }}
+                - name: SCAN_POLL_ATTEMPTS
+                  value: {{ .Values.defectdojo.scan.pollAttempts | quote }}
+                - name: SCAN_POLL_INTERVAL
+                  value: {{ .Values.defectdojo.scan.pollInterval | quote }}
+                - name: DEFECTDOJO_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $ddSecret | quote }}
+                      key: {{ $ddKey | quote }}
+              resources:
+                {{- toYaml .Values.defectdojo.resources | nindent 16 }}
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: script
+              configMap:
+                name: {{ $name }}-script
+            - name: tmp
+              emptyDir: {}
+{{- end }}

@@ -86,6 +86,57 @@ images:
     repository: ospd-openvas
     tag: stable
 
+# Scheduled OpenVAS scan -> DefectDojo upload (rendered by
+# templates/defectdojo-cronjob.yaml). Runs the same end-to-end flow as
+# `uds run test:api-scan` + scripts/upload-to-defectdojo.py, on a schedule,
+# entirely in-cluster with curl (no Python / no custom image). DefectDojo is
+# NOT part of this bundle -- point `url` at a reachable instance and supply a token.
+defectdojo:
+  enabled: false
+  # Cron schedule (cluster timezone). Default: daily at 02:00.
+  schedule: "0 2 * * *"
+  # Small image providing curl + a POSIX shell. Added to the Zarf package images
+  # so it is available in airgap; mutated to the internal registry on deploy.
+  image: docker.io/alpine/curl:8.12.1
+
+  # --- DefectDojo target (mirrors scripts/upload-to-defectdojo.py env vars) ---
+  url: https://defectdojo.uds.dev
+  product: Greenbone
+  productType: Greenbone
+  engagement: OpenVAS Scan
+  # *.uds.dev uses a dev CA; set true to verify TLS against DefectDojo.
+  verifyTls: false
+  # DefectDojo API v2 token. Provide EITHER `token` (a Secret is created for you)
+  # OR `existingSecret`/`tokenKey` to reference a Secret you manage out-of-band.
+  token: ""
+  existingSecret: ""
+  tokenKey: token
+
+  # --- Scan settings ---
+  # In-cluster openvas-api service URL.
+  openvasApiUrl: http://openvas-api.greenbone.svc.cluster.local
+  scan:
+    # Hosts/CIDRs to scan. 127.0.0.1 self-scans the greenbone pod's own listeners
+    # (matches the test:api-scan task); set to real targets for a useful scan.
+    targetHosts: "127.0.0.1"
+    # Completion polling: pollAttempts * pollInterval bounds total scan wait
+    # (default 60 * 30s = 30 min). activeDeadlineSeconds below caps the whole job.
+    pollAttempts: 60
+    pollInterval: 30
+
+  # CronJob lifecycle.
+  backoffLimit: 1
+  activeDeadlineSeconds: 5400
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
 gvmd:
   tcpListener:
     # Expose gvmd's GMP protocol on a TCP port so the separate openvas-api

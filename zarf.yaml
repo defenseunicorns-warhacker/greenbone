@@ -29,3 +29,6 @@ components:
       - registry.community.greenbone.net/community/gsad:stable
       - registry.community.greenbone.net/community/openvas-scanner:stable
       - registry.community.greenbone.net/community/ospd-openvas:stable
+      # curl + POSIX shell image for the scheduled DefectDojo upload CronJob
+      # (charts/greenbone defectdojo.enabled). Keep in sync with that value.
+      - docker.io/alpine/curl:8.12.1

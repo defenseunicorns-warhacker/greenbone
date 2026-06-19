@@ -3,6 +3,7 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/defenseunicorns/uds-cli/refs/heads/main/tasks.schema.json
 includes:
   - test: ./tasks/test.yaml
+  - defectdojo: ./tasks/defectdojo.yaml
   - create: https://raw.githubusercontent.com/defenseunicorns/uds-common/v1.24.5/tasks/create.yaml
   - lint: https://raw.githubusercontent.com/defenseunicorns/uds-common/v1.24.5/tasks/lint.yaml
   - pull: https://raw.githubusercontent.com/defenseunicorns/uds-common/v1.24.5/tasks/pull.yaml
