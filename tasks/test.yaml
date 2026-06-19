@@ -7,7 +7,8 @@ tasks:
       - task: health-check
       # - task: custom-resource-test
       - task: ingress
-      - task: ui
+      #- task: ui
+      - task: api-scan
 
   # Ensure application deploys successfully and becomes available
   - name: health-check
@@ -79,3 +80,54 @@ tasks:
             mcr.microsoft.com/playwright:v1.59.1 \
             bash -lc "npm ci && npx playwright test"
         dir: tests
+  
+  # Exercise the scan pipeline through the openvas-api package (exposed at
+  # https://openvas-api.uds.dev): create a target for this pod, run a scan, wait for it
+  # to finish, and print the results. The API drives gvmd over its GMP TCP connection
+  # (the gvmd.tcpListener socat sidecar), so this needs no browser/UI. Uses the bundled
+  # `uds zarf tools yq` for JSON parsing (no jq dependency).
+  - name: api-scan
+    description: Create a target and run a scan to completion via the openvas-api
+    actions:
+      - cmd: |
+          API=https://openvas-api.uds.dev
+          # Unique per-run suffix so the task is idempotent/re-runnable: GVM rejects a
+          # duplicate target name and the API has no delete endpoint to clean up afterward.
+          RUN_ID="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || date +%s)"
+
+          # 127.0.0.1 = the greenbone pod the scanner (ospd) runs in, so this self-scans
+          # the pod's own listeners. Retried: covers the openvas-api ingress still coming
+          # up AND the default port list (a feed object) still importing after deploy.
+          TARGET=
+          for i in $(seq 1 60); do
+            TARGET="$(curl -fsS -X POST "$API/targets" -H 'Content-Type: application/json' \
+              -d "{\"name\":\"this-pod-${RUN_ID}\",\"hosts\":\"127.0.0.1\"}" 2>/dev/null)"
+            [ -n "$TARGET" ] && break
+            echo "waiting for openvas-api + feed objects..."; sleep 5
+          done
+          [ -n "$TARGET" ] || { echo "failed to create target"; exit 1; }
+          TARGET_ID="$(printf '%s' "$TARGET" | uds zarf tools yq '.id')"
+          echo "Target ID: $TARGET_ID"
+
+          # Create and start the scan (default 'Full and fast' config).
+          SCAN="$(curl -fsS -X POST "$API/scans" -H 'Content-Type: application/json' \
+            -d "{\"name\":\"this-pod scan ${RUN_ID}\",\"target_id\":\"${TARGET_ID}\"}")"
+          TASK_ID="$(printf '%s' "$SCAN" | uds zarf tools yq '.task_id')"
+          [ -n "$TASK_ID" ] || { echo "failed to start scan"; exit 1; }
+          echo "Task ID: $TASK_ID"
+
+          # Poll until the scan is Done (bounded ~30 min so CI can't hang).
+          done_ok=
+          for i in $(seq 1 60); do
+            RESP="$(curl -fsS "$API/scans/${TASK_ID}" 2>/dev/null)"
+            STATE="$(printf '%s' "$RESP" | uds zarf tools yq '.status')"
+            PROG="$(printf '%s' "$RESP" | uds zarf tools yq '.progress')"
+            echo "scan status=${STATE} progress=${PROG}"
+            [ "$STATE" = "Done" ] && { done_ok=1; break; }
+            sleep 30
+          done
+          [ -n "$done_ok" ] || { echo "scan did not complete within the timeout"; exit 1; }
+          echo "Scan complete"
+
+          # Print the results.
+          curl -fsS "$API/results?task_id=${TASK_ID}" | uds zarf tools yq -P '.'
