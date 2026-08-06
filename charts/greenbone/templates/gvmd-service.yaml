@@ -1,0 +1,17 @@
+{{- if .Values.gvmd.tcpListener.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "greenbone.fullname" . }}-gvmd
+  labels:
+    {{- include "greenbone.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "greenbone.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: gvmd-gmp
+      port: {{ .Values.gvmd.tcpListener.port }}
+      targetPort: gvmd-gmp
+      protocol: TCP
+{{- end }}

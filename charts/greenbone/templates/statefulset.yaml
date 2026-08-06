@@ -1,0 +1,625 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "greenbone.fullname" . }}
+  labels:
+    {{- include "greenbone.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  serviceName: {{ include "greenbone.fullname" . }}-headless
+  selector:
+    matchLabels:
+      {{- include "greenbone.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "greenbone.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: greenbone
+      annotations:
+        container.apparmor.security.beta.kubernetes.io/ospd-openvas: unconfined
+    spec:
+      serviceAccountName: {{ include "greenbone.fullname" . }}
+      # The upstream Greenbone container stack is built to run as root: the feed/data
+      # images chmod/touch root-owned paths, PostgreSQL starts as root and drops to the
+      # postgres user (and requires its data dir to be 0700 with no group access, so no
+      # fsGroup), and openvasd binds :80. Running as root here matches the upstream
+      # design; the non-root policy is waived via the UDS Exemption.
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
+      # Collapsed into a single pod, the few cross-container TCP links by service name
+      # don't resolve via DNS. ospd-openvas reaches the notus service at
+      # http://openvasd:80, so map that name to the shared pod loopback. All other links
+      # (gvmd, gsad, postgres, redis, ospd) go through mounted-emptyDir sockets.
+      hostAliases:
+        - ip: "127.0.0.1"
+          hostnames:
+            - openvasd
+      initContainers:
+        - name: gpg-data
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.gpgData.repository }}:{{ .Values.images.gpgData.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              for f in /var/lib/greenbone/gpg/*; do
+                [ -S "$f" ] && continue
+                cp -a "$f" /mnt/ 2>/dev/null || true
+              done
+          volumeMounts:
+            - name: gpg-data
+              mountPath: /mnt
+        # Each feed/data image ships its own entrypoint (/bin/init.sh, or gsa's
+        # setup-gsa) that copies its bundled data into MOUNT_PATH -- extracting the
+        # notus/scap tarballs, stripping the FEED_RELEASE version dir for vt and
+        # data-objects, and applying per-image merge/cleanup rules on the shared
+        # cert-data and data-objects volumes. We run those entrypoints unmodified
+        # (PVC mounted at MOUNT_PATH, KEEP_ALIVE unset so each exits after seeding)
+        # rather than a hand-rolled copy, so an upstream feed-layout change can't
+        # silently leave a volume half-seeded. Order matters: cert-bund before
+        # dfn-cert, and data-objects before report-formats, because the second of
+        # each pair merges into the volume the first one populates.
+        - name: vulnerability-tests
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.vulnerabilityTests.repository }}:{{ .Values.images.vulnerabilityTests.tag }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MOUNT_PATH
+              value: /mnt
+            - name: FEED_RELEASE
+              value: {{ .Values.feedRelease | quote }}
+          volumeMounts:
+            - name: vt-data
+              mountPath: /mnt
+        - name: notus-data
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.notusData.repository }}:{{ .Values.images.notusData.tag }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MOUNT_PATH
+              value: /mnt
+          volumeMounts:
+            - name: notus-data
+              mountPath: /mnt
+        {{- if .Values.feeds.secInfo }}
+        # SecInfo feeds (SCAP CVE/CPE + CERT advisories). Seeding + the multi-GB SCAP import
+        # dominate gvmd's feed sync and delay when scan configs become available, so this is
+        # gated behind feeds.secInfo: set it false for dev/CI to skip the SecInfo data entirely
+        # (scans still run via NVTs; reports just lack CVE/CPE cross-references) and reach a
+        # scan-ready state far faster. Keep it true for production.
+        - name: scap-data
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.scapData.repository }}:{{ .Values.images.scapData.tag }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MOUNT_PATH
+              value: /mnt
+          volumeMounts:
+            - name: scap-data
+              mountPath: /mnt
+        - name: cert-bund-data
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.certBundData.repository }}:{{ .Values.images.certBundData.tag }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MOUNT_PATH
+              value: /mnt
+          volumeMounts:
+            - name: cert-data
+              mountPath: /mnt
+        - name: dfn-cert-data
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.dfnCertData.repository }}:{{ .Values.images.dfnCertData.tag }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MOUNT_PATH
+              value: /mnt
+          volumeMounts:
+            - name: cert-data
+              mountPath: /mnt
+        {{- end }}
+        - name: data-objects
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.dataObjects.repository }}:{{ .Values.images.dataObjects.tag }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MOUNT_PATH
+              value: /mnt
+            - name: FEED_RELEASE
+              value: {{ .Values.feedRelease | quote }}
+          volumeMounts:
+            - name: data-objects
+              mountPath: /mnt
+        - name: report-formats
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.reportFormats.repository }}:{{ .Values.images.reportFormats.tag }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MOUNT_PATH
+              value: /mnt
+            - name: FEED_RELEASE
+              value: {{ .Values.feedRelease | quote }}
+          volumeMounts:
+            - name: data-objects
+              mountPath: /mnt
+        # gsa's entrypoint runs setup-gsa (generates config.js, then copies the web
+        # assets to MOUNT_PATH) and exits when MOUNT_PATH is set and KEEP_ALIVE is
+        # not. gsad later serves these assets read-only from the same volume.
+        - name: gsa
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.gsa.repository }}:{{ .Values.images.gsa.tag }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MOUNT_PATH
+              value: /mnt/web
+          volumeMounts:
+            - name: gsa-data
+              mountPath: /mnt/web
+        # gvmd expects its working dir /var/lib/gvm/gvmd to exist (for its lock file). The
+        # image ships it, but the empty gvmd-data PVC mounts over /var/lib/gvm and hides
+        # it -- same PVC-shadowing issue as postgres. Seed it from the image on first run.
+        - name: gvmd-data-init
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.gvmd.repository }}:{{ .Values.images.gvmd.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              if [ -d /mnt/gvmd ]; then
+                echo "gvmd data already present on volume; skipping seed"
+              else
+                echo "seeding gvmd data dirs from image into empty volume"
+                cp -a /var/lib/gvm/. /mnt/
+              fi
+          volumeMounts:
+            - name: gvmd-data
+              mountPath: /mnt
+        {{- if .Values.postgres.embedded }}
+        # Embedded mode only. The postgres image ships a pre-created cluster at
+        # /var/lib/postgresql/<ver>/main; an empty PVC would shadow it, so seed the PVC
+        # from the image on first run (skip if already initialized so data survives).
+        - name: pg-cluster-init
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.pgGvm.repository }}:{{ .Values.images.pgGvm.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              if ls /mnt/*/main/PG_VERSION >/dev/null 2>&1; then
+                echo "postgres cluster already present on volume; skipping seed"
+              else
+                echo "seeding postgres cluster from image into empty volume"
+                cp -a /var/lib/postgresql/. /mnt/
+              fi
+          volumeMounts:
+            - name: psql-data
+              mountPath: /mnt
+        - name: pg-gvm-migrator
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.pgGvmMigrator.repository }}:{{ .Values.images.pgGvmMigrator.tag }}
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: psql-data
+              mountPath: /var/lib/postgresql
+            - name: psql-socket
+              mountPath: /var/run/postgresql
+        {{- else }}
+        # External mode (greenbone-db package). start-gvmd does its DB setup -- migrate,
+        # create-user, set feed-import-owner -- with bare gvmd commands that use gvmd's
+        # local-socket default, so on an external DB they silently fail and only the daemon
+        # (explicit --db-host in GVMD_ARGS) ever reaches greenbone-db. That left the admin
+        # uncreated and, worse, the feed owner unset until after the daemon's first feed
+        # check, so feed objects (port lists, scan configs) didn't import on first boot.
+        #
+        # Do that whole setup HERE, before the daemon, against the external DB via explicit
+        # --db-host -- the same order start-gvmd uses in embedded mode. Then the daemon starts
+        # with schema + admin + feed owner already in place and imports the feed objects on its
+        # first check (no post-daemon race). Runs as the gvmd user via gosu (SysV semaphore
+        # ownership) with the seeded gvmd-data dir mounted so gvmd has its normal home; every
+        # step is best-effort so re-deploys against an initialized DB stay idempotent. Finally
+        # drops the "started" marker that start-gvmd (PGRES_DATA=/pgmarker) waits on.
+        #
+        # NOTE on the logs: on a FRESH DB, `gvmd --migrate` is a no-op ("already at the supported
+        # version" -- it only upgrades an existing schema). The schema is actually initialized by
+        # `gvmd --create-user`, which probes the version first and logs a benign
+        # `relation "public.meta" does not exist` warning before creating the schema + user
+        # ("User created."). `No SCAP/CERT database found` is also benign (SecInfo still loading).
+        # Both warnings are expected and appear in embedded mode too.
+        - name: gvmd-db-init
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.gvmd.repository }}:{{ .Values.images.gvmd.tag }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "greenbone.fullname" . }}-admin
+                  key: username
+            - name: PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "greenbone.fullname" . }}-admin
+                  key: password
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.existingSecret }}
+                  key: {{ .Values.postgres.secretKey }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              DBARGS="--db-host={{ .Values.postgres.host }} --db-port={{ .Values.postgres.port }} --db-user={{ .Values.postgres.user }}"
+              until pg_isready -h {{ .Values.postgres.host }} -p {{ .Values.postgres.port }} -U {{ .Values.postgres.user }} -d {{ .Values.postgres.database }}; do
+                echo "waiting for postgres at {{ .Values.postgres.host }}:{{ .Values.postgres.port }}"
+                sleep 2
+              done
+              gosu gvmd gvmd --migrate $DBARGS || true
+              gosu gvmd gvmd --create-user="$USER" --password="$PASSWORD" $DBARGS \
+                || gosu gvmd gvmd --user="$USER" --new-password="$PASSWORD" $DBARGS || true
+              uid=$(gosu gvmd gvmd --get-users --verbose $DBARGS 2>/dev/null | awk -v u="$USER" '$1==u{print $2}')
+              if [ -n "$uid" ]; then
+                gosu gvmd gvmd --modify-setting 78eceaec-3385-11ea-b237-28d24461215b --value "$uid" $DBARGS || true
+                gosu gvmd gvmd --modify-setting 1ee1f106-8b2e-461c-b426-7f5d76001b29 --value "$uid" $DBARGS || true
+              fi
+              touch /pgmarker/started
+          volumeMounts:
+            - name: gvmd-data
+              mountPath: /var/lib/gvm
+            - name: pg-marker
+              mountPath: /pgmarker
+        {{- end }}
+        - name: configure-openvas
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.openvasScanner.repository }}:{{ .Values.images.openvasScanner.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              printf "table_driven_lsc = yes\nopenvasd_server = http://openvasd:80\n" > /mnt/openvas.conf
+              sed "s/127/128/" /etc/openvas/openvas_log.conf | sed 's/gvm/openvas/' > /mnt/openvas_log.conf
+              chmod 644 /mnt/openvas.conf
+              chmod 644 /mnt/openvas_log.conf
+              touch /var/log/openvas/openvas.log
+              chmod 666 /var/log/openvas/openvas.log
+          volumeMounts:
+            - name: openvas-data
+              mountPath: /mnt
+            - name: openvas-log-data
+              mountPath: /var/log/openvas
+      containers:
+        # redis only listens on the /run/redis/redis.sock Unix socket (TCP is disabled
+        # with `port 0`), so readiness is probed through redis-cli over that socket.
+        - name: redis-server
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.redisServer.repository }}:{{ .Values.images.redisServer.tag }}
+          imagePullPolicy: IfNotPresent
+          resources:
+            {{- toYaml .Values.resources.redis | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "-s", "/run/redis/redis.sock", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          volumeMounts:
+            - name: redis-socket
+              mountPath: /run/redis
+        {{- if .Values.postgres.embedded }}
+        # Embedded mode only. By default gvmd uses the external greenbone-db package;
+        # set postgres.embedded=true to run PostgreSQL in-pod instead.
+        - name: pg-gvm
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.pgGvm.repository }}:{{ .Values.images.pgGvm.tag }}
+          imagePullPolicy: IfNotPresent
+          resources:
+            {{- toYaml .Values.resources.postgres | nindent 12 }}
+          # start-postgresql touches /var/lib/postgresql/started when the cluster is
+          # accepting connections (and removes it on restart); this is the same marker
+          # gvmd waits on. We probe the marker rather than pg_isready, which would connect
+          # as OS user "root" and spam the postgres log with "role root does not exist".
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/var/lib/postgresql/started"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          volumeMounts:
+            - name: psql-data
+              mountPath: /var/lib/postgresql
+            - name: psql-socket
+              mountPath: /var/run/postgresql
+        {{- end }}
+        - name: gvmd
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.gvmd.repository }}:{{ .Values.images.gvmd.tag }}
+          imagePullPolicy: IfNotPresent
+          # USER/PASSWORD feed the GSA admin account (from a Secret, so the deploy gets a unique
+          # password instead of the upstream admin/admin). In embedded mode start-gvmd creates it
+          # directly; in external mode the gvmd-db-init init container creates it (and sets the
+          # feed owner) against greenbone-db before this daemon starts -- start-gvmd's own
+          # local-socket create-user attempt here is a harmless no-op.
+          env:
+            - name: USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "greenbone.fullname" . }}-admin
+                  key: username
+            - name: PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "greenbone.fullname" . }}-admin
+                  key: password
+            {{- if not .Values.postgres.embedded }}
+            # External DB: point gvmd (and start-gvmd's psql wait loop, via libpq's
+            # PG* vars) at the greenbone-db service. PGRES_DATA is the dir start-gvmd
+            # checks for the "started" marker the gvmd-db-init init container created.
+            - name: GVMD_ARGS
+              value: "-f --listen-mode=666 --db-host={{ .Values.postgres.host }} --db-port={{ .Values.postgres.port }} --db-user={{ .Values.postgres.user }} --database={{ .Values.postgres.database }}"
+            - name: GVMD_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: PGRES_DATA
+              value: /pgmarker
+            - name: PGHOST
+              value: {{ .Values.postgres.host | quote }}
+            - name: PGPORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.existingSecret }}
+                  key: {{ .Values.postgres.secretKey }}
+            {{- end }}
+          # Admin + feed-owner bootstrap for the external DB happens in the gvmd-db-init init
+          # container (before the daemon), so no postStart hook is needed here.
+          {{- if not .Values.postgres.embedded }}
+          # start-gvmd's bare `gvmd --create-user` uses gvmd's local-socket default and never
+          # reaches the external DB, so it can't create the GSA admin there. Once the daemon is
+          # up (socket present) and the schema is initialized, ensure the admin in greenbone-db
+          # via an explicit --db-host. Idempotent (create, else reset the password to match the
+          # Secret) and best-effort (trailing `|| true`) so a transient failure never kills the
+          # serving container. Runs as the gvmd user via gosu so it shares the daemon's SysV
+          # semaphore set (a root-run gvmd hits "semaphore operation failed: Permission denied").
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    for i in $(seq 1 60); do [ -S /run/gvmd/gvmd.sock ] && break; sleep 5; done
+                    gosu gvmd gvmd --create-user="$USER" --password="$PASSWORD" \
+                      --db-host={{ .Values.postgres.host }} --db-port={{ .Values.postgres.port }} --db-user={{ .Values.postgres.user }} \
+                    || gosu gvmd gvmd --user="$USER" --new-password="$PASSWORD" \
+                      --db-host={{ .Values.postgres.host }} --db-port={{ .Values.postgres.port }} --db-user={{ .Values.postgres.user }} \
+                    || true
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources.gvmd | nindent 12 }}
+          # gvmd creates /run/gvmd/gvmd.sock once it is accepting connections (after the
+          # postgres wait and --migrate). Feed ingestion continues in the background after
+          # this point, so socket presence is the right readiness signal.
+          readinessProbe:
+            exec:
+              command: ["test", "-S", "/run/gvmd/gvmd.sock"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 60
+          volumeMounts:
+            - name: gvmd-data
+              mountPath: /var/lib/gvm
+            {{- if .Values.feeds.secInfo }}
+            - name: scap-data
+              mountPath: /var/lib/gvm/scap-data
+            - name: cert-data
+              mountPath: /var/lib/gvm/cert-data
+            {{- end }}
+            - name: data-objects
+              mountPath: /var/lib/gvm/data-objects/gvmd
+            - name: vt-data
+              mountPath: /var/lib/openvas/plugins
+            - name: gvmd-socket
+              mountPath: /run/gvmd
+            - name: ospd-openvas-socket
+              mountPath: /run/ospd
+            {{- if .Values.postgres.embedded }}
+            - name: psql-data
+              mountPath: /var/lib/postgresql
+            - name: psql-socket
+              mountPath: /var/run/postgresql
+            {{- else }}
+            - name: pg-marker
+              mountPath: /pgmarker
+            {{- end }}
+        {{- if .Values.gvmd.tcpListener.enabled }}
+        # Proxy gvmd's Unix socket to a TCP port so the separate openvas-api Deployment
+        # (in its own pod) can reach gvmd. socat forwards plain TCP 9390 to the socket;
+        # no TLS is needed because both ends are within the cluster namespace.
+        - name: gvmd-proxy
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.gvmd.repository }}:{{ .Values.images.gvmd.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - socat
+            - TCP-LISTEN:{{ .Values.gvmd.tcpListener.port }},reuseaddr,fork
+            - UNIX-CONNECT:/run/gvmd/gvmd.sock
+          ports:
+            - name: gvmd-gmp
+              containerPort: {{ .Values.gvmd.tcpListener.port }}
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: gvmd-gmp
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 12
+          volumeMounts:
+            - name: gvmd-socket
+              mountPath: /run/gvmd
+        {{- end }}
+        - name: gsad
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.gsad.repository }}:{{ .Values.images.gsad.tag }}
+          imagePullPolicy: IfNotPresent
+          # gsad serves the GSA web UI directly on 9392. UDS Core (Istio) terminates TLS
+          # and handles ingress, so the upstream nginx TLS/static proxy is unnecessary --
+          # GSAD_API_ONLY is omitted so gsad serves the static content itself from
+          # --static-content (/usr/local/share/gvm/gsad/web), populated from the gsa image
+          # by the gsa init container into the gsa-data volume.
+          env:
+            - name: GSAD_HTTP_ONLY
+              value: "true"
+            - name: GSAD_FOREGROUND
+              value: "true"
+          ports:
+            - name: gsa
+              containerPort: 9392
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: gsa
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: gsa
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          volumeMounts:
+            - name: gvmd-socket
+              mountPath: /run/gvmd
+            - name: gsa-data
+              mountPath: /usr/local/share/gvm/gsad/web
+              readOnly: true
+        - name: openvas
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.openvasScanner.repository }}:{{ .Values.images.openvasScanner.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              cat /etc/openvas/openvas.conf
+              tail -f /var/log/openvas/openvas.log
+          volumeMounts:
+            - name: openvas-data
+              mountPath: /etc/openvas
+            - name: openvas-log-data
+              mountPath: /var/log/openvas
+        - name: openvasd
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.openvasScanner.repository }}:{{ .Values.images.openvasScanner.tag }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: OPENVASD_MODE
+              value: service_notus
+            - name: GNUPGHOME
+              value: /etc/openvas/gnupg
+            - name: LISTENING
+              value: 0.0.0.0:80
+          resources:
+            {{- toYaml .Values.resources.openvasd | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 18
+          volumeMounts:
+            - name: openvas-data
+              mountPath: /etc/openvas
+            - name: openvas-log-data
+              mountPath: /var/log/openvas
+            - name: gpg-data
+              mountPath: /etc/openvas/gnupg
+            - name: notus-data
+              mountPath: /var/lib/notus
+        - name: ospd-openvas
+          image: {{ .Values.imageRegistry }}/{{ .Values.images.ospdOpenvas.repository }}:{{ .Values.images.ospdOpenvas.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - ospd-openvas
+            - -f
+            - --config
+            - /etc/gvm/ospd-openvas.conf
+            - --notus-feed-dir
+            - /var/lib/notus/advisories
+            - -m
+            - "666"
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+            seccompProfile:
+              type: Unconfined
+          resources:
+            {{- toYaml .Values.resources.ospdOpenvas | nindent 12 }}
+          # ospd-openvas exposes its control socket at /run/ospd/ospd-openvas.sock once
+          # the daemon is up; gvmd drives scans through it. VT loading into redis happens
+          # in the background, so socket presence (not full feed load) gates readiness.
+          readinessProbe:
+            exec:
+              command: ["test", "-S", "/run/ospd/ospd-openvas.sock"]
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 40
+          volumeMounts:
+            - name: gpg-data
+              mountPath: /etc/openvas/gnupg
+            - name: vt-data
+              mountPath: /var/lib/openvas/plugins
+            - name: notus-data
+              mountPath: /var/lib/notus
+            - name: ospd-openvas-socket
+              mountPath: /run/ospd
+            - name: redis-socket
+              mountPath: /run/redis
+            - name: openvas-data
+              mountPath: /etc/openvas
+            - name: openvas-log-data
+              mountPath: /var/log/openvas
+      volumes:
+        {{- if .Values.postgres.embedded }}
+        - name: psql-socket
+          emptyDir: {}
+        {{- else }}
+        # holds the "started" marker the gvmd-db-init init container drops for start-gvmd
+        - name: pg-marker
+          emptyDir: {}
+        {{- end }}
+        - name: gvmd-socket
+          emptyDir: {}
+        - name: ospd-openvas-socket
+          emptyDir: {}
+        - name: redis-socket
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  volumeClaimTemplates:
+    {{- $root := . -}}
+    {{- range $name, $cfg := .Values.persistence.volumes }}
+    {{- /* Skip PVCs this configuration doesn't use:
+           - psqlData unless PostgreSQL runs in-pod (the external DB owns its own PVC)
+           - scapData / certData unless SecInfo feeds are enabled */}}
+    {{- $skip := false }}
+    {{- if and (eq $name "psqlData") (not $root.Values.postgres.embedded) }}{{- $skip = true }}{{- end }}
+    {{- if and (or (eq $name "scapData") (eq $name "certData")) (not $root.Values.feeds.secInfo) }}{{- $skip = true }}{{- end }}
+    {{- if not $skip }}
+    - metadata:
+        name: {{ kebabcase $name }}
+      spec:
+        accessModes:
+          {{- toYaml $root.Values.persistence.accessModes | nindent 10 }}
+        resources:
+          requests:
+            storage: {{ default $root.Values.persistence.size $cfg.size }}
+        {{- if $root.Values.persistence.storageClass }}
+        storageClassName: {{ $root.Values.persistence.storageClass | quote }}
+        {{- end }}
+    {{- end }}
+    {{- end }}

@@ -1,0 +1,216 @@
+replicaCount: 1
+
+imageRegistry: registry.community.greenbone.net/community
+feedRelease: "24.10"
+
+# Feed selection.
+#   secInfo: true (default) -> load the SCAP (CVE/CPE) + CERT advisory feeds, so reports
+#            include CVE cross-references. The multi-GB SCAP import dominates gvmd's feed
+#            sync and delays when scan configs become available.
+#   secInfo: false -> skip the SCAP/CERT feeds entirely (no scap-data/cert init containers,
+#            PVCs, or gvmd mounts). Scans still run via NVTs; reports just lack CVE/CPE
+#            enrichment. Use for dev/CI to reach a scan-ready state far faster.
+feeds:
+  secInfo: true
+
+# Initial Greenbone Security Assistant admin account, created by gvmd on first boot.
+# Leave password empty to auto-generate a random one (stored in the
+# greenbone-community-admin Secret and preserved across upgrades).
+admin:
+  user: admin
+  password: ""
+
+# PostgreSQL backend for gvmd.
+#   embedded: false (default) -> gvmd connects over TCP to the separate greenbone-db
+#             Zarf package; the in-pod pg-gvm container and psql PVC are not rendered.
+#   embedded: true            -> run the legacy in-pod pg-gvm container instead.
+# The database name must stay "gvmd": the gvmd image's start-gvmd hard-codes a
+# `psql -d gvmd` readiness check. existingSecret is the Secret (same namespace,
+# created by the greenbone-db package) holding the DB password under secretKey.
+postgres:
+  embedded: false
+  host: greenbone-db
+  port: 5432
+  database: gvmd
+  user: gvmd
+  existingSecret: greenbone-db-credentials
+  secretKey: password
+
+images:
+  vulnerabilityTests:
+    repository: vulnerability-tests
+    tag: latest
+  notusData:
+    repository: notus-data
+    tag: latest
+  scapData:
+    repository: scap-data
+    tag: latest
+  certBundData:
+    repository: cert-bund-data
+    tag: latest
+  dfnCertData:
+    repository: dfn-cert-data
+    tag: latest
+  dataObjects:
+    repository: data-objects
+    tag: latest
+  reportFormats:
+    repository: report-formats
+    tag: latest
+  gpgData:
+    repository: gpg-data
+    tag: latest
+  redisServer:
+    repository: redis-server
+    tag: latest
+  pgGvm:
+    repository: pg-gvm
+    tag: stable
+  pgGvmMigrator:
+    repository: pg-gvm-migrator
+    tag: stable
+  gvmd:
+    repository: gvmd
+    tag: stable
+  gsa:
+    repository: gsa
+    tag: stable-slim
+  gsad:
+    repository: gsad
+    tag: stable
+  openvasScanner:
+    repository: openvas-scanner
+    tag: stable
+  ospdOpenvas:
+    repository: ospd-openvas
+    tag: stable
+
+# Scheduled OpenVAS scan -> DefectDojo upload (rendered by
+# templates/defectdojo-cronjob.yaml). Runs the same end-to-end flow as
+# `uds run test:api-scan` + scripts/upload-to-defectdojo.py, on a schedule,
+# entirely in-cluster with curl (no Python / no custom image). DefectDojo is
+# NOT part of this bundle -- point `url` at a reachable instance and supply a token.
+defectdojo:
+  enabled: false
+  # Cron schedule (cluster timezone). Default: daily at 02:00.
+  schedule: "0 2 * * *"
+  # Small image providing curl + a POSIX shell. Added to the Zarf package images
+  # so it is available in airgap; mutated to the internal registry on deploy.
+  image: docker.io/alpine/curl:8.12.1
+
+  # --- DefectDojo target (mirrors scripts/upload-to-defectdojo.py env vars) ---
+  url: https://defectdojo.uds.dev
+  product: Greenbone
+  productType: Greenbone
+  engagement: OpenVAS Scan
+  # *.uds.dev uses a dev CA; set true to verify TLS against DefectDojo.
+  verifyTls: false
+  # DefectDojo API v2 token. Provide EITHER `token` (a Secret is created for you)
+  # OR `existingSecret`/`tokenKey` to reference a Secret you manage out-of-band.
+  token: ""
+  existingSecret: ""
+  tokenKey: token
+
+  # --- Scan settings ---
+  # In-cluster openvas-api service URL.
+  openvasApiUrl: http://openvas-api.greenbone.svc.cluster.local
+  scan:
+    # Hosts/CIDRs to scan. 127.0.0.1 self-scans the greenbone pod's own listeners
+    # (matches the test:api-scan task); set to real targets for a useful scan.
+    targetHosts: "127.0.0.1"
+    # Completion polling: pollAttempts * pollInterval bounds total scan wait
+    # (default 60 * 30s = 30 min). activeDeadlineSeconds below caps the whole job.
+    pollAttempts: 60
+    pollInterval: 30
+
+  # CronJob lifecycle.
+  backoffLimit: 1
+  activeDeadlineSeconds: 5400
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+gvmd:
+  tcpListener:
+    # Expose gvmd's GMP protocol on a TCP port so the separate openvas-api
+    # package can reach it from its own pod. TLS is used; the openvas-api
+    # connects with cert verification disabled (gvmd uses a self-signed cert).
+    enabled: true
+    port: 9390
+
+service:
+  type: ClusterIP
+  ports:
+    gsa: 9392
+
+persistence:
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  storageClass: ""
+  volumes:
+    gpgData:
+      size: 100Mi
+    scapData:
+      size: 2Gi
+    certData:
+      size: 500Mi
+    dataObjects:
+      size: 500Mi
+    gvmdData:
+      size: 1Gi
+    psqlData:
+      size: 5Gi
+    vtData:
+      size: 2Gi
+    notusData:
+      size: 1Gi
+    openvasData:
+      size: 100Mi
+    openvasLogData:
+      size: 500Mi
+    gsaData:
+      size: 200Mi
+
+resources:
+  gvmd:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      memory: 4Gi
+  ospdOpenvas:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      memory: 4Gi
+  openvasd:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  postgres:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  redis:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

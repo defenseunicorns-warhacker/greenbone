@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/defenseunicorns/zarf/main/zarf.schema.json
+kind: ZarfPackageConfig
+metadata:
+  name: openvas-api
+  description: OpenVAS REST API wrapper for Greenbone Community Edition
+  version: dev
+
+components:
+  - name: openvas-api
+    required: true
+    import:
+      path: common
+    actions:
+      onCreate:
+        before:
+          - description: Ensure buildx builder exists
+            cmd: |
+              docker buildx create --use \
+                --name uds-builder \
+                --driver docker-container || true
+          - description: Build container image for package
+            cmd: |
+              docker buildx build ./src \
+                --builder=uds-builder \
+                --platform=linux/amd64,linux/arm64 \
+                --tag=zarf.internal/openvas-api:dev \
+                --output=type=oci,dest=openvas-api.tar
+    imageArchives:
+      - path: openvas-api.tar
+        images:
+          - zarf.internal/openvas-api:dev

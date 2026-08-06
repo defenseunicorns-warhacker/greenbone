@@ -1,0 +1,15 @@
+kind: ZarfPackageConfig
+metadata:
+  name: greenbone-db
+  description: PostgreSQL (pg-gvm) database for Greenbone Community Edition
+  version: dev
+
+components:
+  - name: greenbone-db
+    required: true
+    only:
+      flavor: upstream
+    import:
+      path: common
+    images:
+      - registry.community.greenbone.net/community/pg-gvm:stable

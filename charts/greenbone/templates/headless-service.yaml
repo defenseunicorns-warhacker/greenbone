@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "greenbone.fullname" . }}-headless
+  labels:
+    {{- include "greenbone.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "greenbone.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: gsa
+      port: {{ .Values.service.ports.gsa }}
+      targetPort: gsa
+      protocol: TCP

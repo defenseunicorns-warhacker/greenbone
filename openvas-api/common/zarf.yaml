@@ -1,0 +1,13 @@
+kind: ZarfPackageConfig
+components:
+  - name: openvas-api
+    required: true
+    description: Deploy the OpenVAS REST API wrapper
+    charts:
+      - name: openvas-api
+        releaseName: openvas-api
+        localPath: ../charts/openvas-api
+        version: 0.1.0
+        namespace: greenbone
+        valuesFiles:
+          - ../values/upstream-values.yaml

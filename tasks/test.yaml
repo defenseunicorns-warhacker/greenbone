@@ -1,0 +1,156 @@
+# Copyright 2024 Defense Unicorns
+# SPDX-License-Identifier: AGPL-3.0-or-later OR LicenseRef-Defense-Unicorns-Commercial
+# yaml-language-server: $schema=https://raw.githubusercontent.com/defenseunicorns/uds-cli/refs/heads/main/tasks.schema.json
+tasks:
+  - name: all
+    actions:
+      - task: health-check
+      # - task: custom-resource-test
+      - task: ingress
+      #- task: ui
+      - task: api-scan
+
+  # Ensure application deploys successfully and becomes available
+  - name: health-check
+    actions:
+      - description: Greenbone Community Health Check
+        wait:
+          cluster:
+            kind: Pod
+            name: greenbone-community-0
+            namespace: greenbone
+            condition: Ready
+
+  # # If application manages custom resources, then test creating custom resources
+  # - name: custom-resource-test
+  #   description: Test creating a custom resource
+  #   actions:
+  #     # Create test zarf package
+  #     - cmd: |
+  #         ./uds zarf package create --confirm
+  #       dir: tests/optional-example-zarf-tests
+  #     # Generate some kind of test data. In this example it is a certificate
+  #     - cmd: |
+  #         openssl req -x509 -newkey rsa:4096 -keyout testCA.key \
+  #           -out testCA.pem -sha256 -days 3650 -nodes -subj "/C=XX/ST=StateName/L=CityName/O=CompanyName/OU=CompanySectionName/CN=CommonNameOrHostname"
+  #       dir: tests/optional-example-zarf-tests
+  #     # Deploy package with test data
+  #     - cmd: |
+  #         ./uds zarf package deploy \
+  #           --set EXAMPLE_SECRET_VALUE="$(cat testCA.pem | base64 -w 0)" \
+  #           zarf-package-example-zarf-tests-"${UDS_ARCH}"-0.0.1.tar.zst \
+  #           --confirm
+  #       dir: tests/optional-example-zarf-tests
+  #     # Ensure expected resource is generated in some namespace. In this example it is checking for a configmap
+  #     - description: Ensure configmap is created in target namespace
+  #       wait:
+  #         cluster:
+  #           kind: configmap
+  #           name: example-configmap
+  #           namespace: example-ns
+  #     # Cleanup files used to generate test data
+  #     - cmd: |
+  #         rm testCA.key testCA.pem
+  #       dir: tests/optional-example-zarf-tests
+
+  - name: ingress
+    actions:
+      - description: Greenbone Security Assistant UI Status Check
+        maxRetries: 30
+        cmd: |
+          STATUS=$(curl -L -o /dev/null -s -w "%{http_code}\n" https://greenbone.uds.dev)
+          echo "Greenbone system status: ${STATUS}"
+          if [ "$STATUS" != "200" ]; then
+            sleep 10
+            exit 1
+          fi
+
+  - name: ui
+    description: Greenbone UI Checks
+    actions:
+      - cmd: |
+          docker run --rm \
+            --network=host \
+            --shm-size=1g \
+            --security-opt seccomp=unconfined \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp \
+            -e NPM_CONFIG_CACHE=/tmp/.npm \
+            -v "$(pwd)":/app -w /app \
+            mcr.microsoft.com/playwright:v1.59.1 \
+            bash -lc "npm ci && npx playwright test"
+        dir: tests
+  
+  # Exercise the scan pipeline through the openvas-api package (exposed at
+  # https://openvas-api.uds.dev): create a target for this pod, run a scan, wait for it
+  # to finish, and print the results. The API drives gvmd over its GMP TCP connection
+  # (the gvmd.tcpListener socat sidecar), so this needs no browser/UI. Uses the bundled
+  # `uds zarf tools yq` for JSON parsing (no jq dependency).
+  - name: api-scan
+    description: Create a target and run a scan to completion via the openvas-api
+    actions:
+      - cmd: |
+          API=https://openvas-api.uds.dev
+          # Unique per-run suffix so the task is idempotent/re-runnable: GVM rejects a
+          # duplicate target name and the API has no delete endpoint to clean up afterward.
+          RUN_ID="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || date +%s)"
+
+          # Wait for gvmd to finish loading NVTs and creating the default scan configs.
+          # Until then, POST /scans fails with "No scan configs available in GVM". We poll
+          # GET /scan-configs (the same query the scan creation uses) until it's non-empty --
+          # the API-native equivalent of gvmd's "manage_discovery_nvts: Updating Discovery
+          # NVTs done" log line. This also covers the openvas-api ingress still coming up.
+          ready=
+          for i in $(seq 1 120); do
+            N="$(curl -fsS "$API/scan-configs" 2>/dev/null | uds zarf tools yq 'length' 2>/dev/null)"
+            case "$N" in ''|0|null) echo "waiting for gvmd to load NVTs / scan configs..."; sleep 10 ;; *) ready=1; break ;; esac
+          done
+          [ -n "$ready" ] || { echo "gvmd scan configs did not load within the timeout"; exit 1; }
+          echo "gvmd is feed-ready (${N} scan configs)"
+
+          # 127.0.0.1 = the greenbone pod the scanner (ospd) runs in, so this self-scans
+          # the pod's own listeners. Retried: covers the openvas-api ingress still coming
+          # up AND the default port list (a feed object) still importing after deploy.
+          TARGET=
+          for i in $(seq 1 60); do
+            TARGET="$(curl -fsS -X POST "$API/targets" -H 'Content-Type: application/json' \
+              -d "{\"name\":\"this-pod-${RUN_ID}\",\"hosts\":\"127.0.0.1\"}" 2>/dev/null)"
+            [ -n "$TARGET" ] && break
+            echo "waiting for openvas-api + feed objects..."; sleep 5
+          done
+          [ -n "$TARGET" ] || { echo "failed to create target"; exit 1; }
+          TARGET_ID="$(printf '%s' "$TARGET" | uds zarf tools yq '.id')"
+          echo "Target ID: $TARGET_ID"
+
+          # Create and start the scan (default 'Full and fast' config).
+          SCAN="$(curl -fsS -X POST "$API/scans" -H 'Content-Type: application/json' \
+            -d "{\"name\":\"this-pod scan ${RUN_ID}\",\"target_id\":\"${TARGET_ID}\"}")"
+          TASK_ID="$(printf '%s' "$SCAN" | uds zarf tools yq '.task_id')"
+          REPORT_ID="$(printf '%s' "$SCAN" | uds zarf tools yq '.report_id')"
+          [ -n "$TASK_ID" ] || { echo "failed to start scan"; exit 1; }
+          echo "Task ID: $TASK_ID  Report ID: $REPORT_ID"
+
+          # Poll until the scan is Done (bounded ~30 min so CI can't hang).
+          done_ok=
+          for i in $(seq 1 60); do
+            RESP="$(curl -fsS "$API/scans/${TASK_ID}" 2>/dev/null)"
+            STATE="$(printf '%s' "$RESP" | uds zarf tools yq '.status')"
+            PROG="$(printf '%s' "$RESP" | uds zarf tools yq '.progress')"
+            echo "scan status=${STATE} progress=${PROG}"
+            [ "$STATE" = "Done" ] && { done_ok=1; break; }
+            sleep 30
+          done
+          [ -n "$done_ok" ] || { echo "scan did not complete within the timeout"; exit 1; }
+          echo "Scan complete"
+
+          # Write the scan outputs to files. The OpenVAS XML report (openvas-report.xml) is
+          # the format DefectDojo's "OpenVAS Parser" ingests -- upload it out-of-band with
+          # scripts/upload-to-defectdojo.py (DefectDojo is intentionally not in the bundle).
+          # The parsed results JSON is also saved for quick inspection. Paths are overridable
+          # via SCAN_REPORT_FILE / SCAN_RESULTS_FILE.
+          REPORT_FILE="${SCAN_REPORT_FILE:-openvas-report.xml}"
+          RESULTS_FILE="${SCAN_RESULTS_FILE:-openvas-results.json}"
+          curl -fsS "$API/reports/${REPORT_ID}/xml" -o "$REPORT_FILE"
+          curl -fsS "$API/results?task_id=${TASK_ID}" -o "$RESULTS_FILE"
+          echo "wrote ${REPORT_FILE} ($(wc -c <"$REPORT_FILE") bytes) and ${RESULTS_FILE}"
+          uds zarf tools yq -P '.' < "$RESULTS_FILE"

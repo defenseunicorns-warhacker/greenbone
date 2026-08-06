@@ -1,0 +1,117 @@
+# Copyright 2024 Defense Unicorns
+# SPDX-License-Identifier: AGPL-3.0-or-later OR LicenseRef-Defense-Unicorns-Commercial
+# yaml-language-server: $schema=https://raw.githubusercontent.com/defenseunicorns/uds-cli/refs/heads/main/tasks.schema.json
+
+# On-demand control for the scheduled OpenVAS scan -> DefectDojo upload.
+# The CronJob itself is rendered by the greenbone chart when
+# `defectdojo.enabled=true`. These tasks let you trigger and inspect runs
+# without waiting for the schedule. Requires kubectl + a kubeconfig pointed
+# at the cluster.
+tasks:
+  - name: bootstrap-token
+    description: Mint a DefectDojo API token from its admin creds and store it as the greenbone-side Secret (idempotent)
+    inputs:
+      namespace:
+        description: Namespace where Greenbone is deployed (where the token Secret lives)
+        default: greenbone
+      secret:
+        description: Name of the token Secret to create (must match defectdojo.existingSecret)
+        default: defectdojo-token
+      key:
+        description: Key within the token Secret (must match defectdojo.tokenKey)
+        default: token
+      ddNamespace:
+        description: Namespace where DefectDojo is deployed
+        default: defectdojo
+      ddAdminSecret:
+        description: DefectDojo admin Secret holding DD_ADMIN_PASSWORD
+        default: defectdojo
+      ddUrl:
+        description: DefectDojo base URL (reachable from where you run this task)
+        default: https://defectdojo.uds.dev
+      ddUser:
+        description: DefectDojo admin username
+        default: admin
+    actions:
+      - description: Create the token Secret if it does not already exist
+        cmd: |
+          NS="${{ .inputs.namespace }}"
+          SECRET="${{ .inputs.secret }}"
+          KEY="${{ .inputs.key }}"
+          if kubectl -n "${NS}" get secret "${SECRET}" >/dev/null 2>&1; then
+            echo "==> token Secret ${NS}/${SECRET} already exists; leaving it as-is"
+            echo "    (delete it first if you want to re-mint: kubectl -n ${NS} delete secret ${SECRET})"
+            exit 0
+          fi
+
+          DDNS="${{ .inputs.ddNamespace }}"
+          DDSEC="${{ .inputs.ddAdminSecret }}"
+          DD_URL="${{ .inputs.ddUrl }}"
+          DD_USER="${{ .inputs.ddUser }}"
+
+          echo "==> reading DefectDojo admin password from ${DDNS}/${DDSEC}"
+          DD_PASS="$(kubectl -n "${DDNS}" get secret "${DDSEC}" \
+            -o jsonpath='{.data.DD_ADMIN_PASSWORD}' | base64 -d)"
+          if [ -z "${DD_PASS}" ]; then
+            echo "error: could not read DD_ADMIN_PASSWORD from ${DDNS}/${DDSEC}" >&2
+            exit 1
+          fi
+
+          echo "==> requesting an API token from ${DD_URL}"
+          TOKEN="$(curl -sk -X POST "${DD_URL}/api/v2/api-token-auth/" \
+            -H 'Content-Type: application/json' \
+            -d "{\"username\":\"${DD_USER}\",\"password\":\"${DD_PASS}\"}" \
+            | sed -E 's/.*"token":"([^"]+)".*/\1/')"
+          # A valid token is a single opaque string; anything with JSON/braces/spaces is an error body.
+          case "${TOKEN}" in
+            ""|*"{"*|*"}"*|*" "*)
+              echo "error: failed to obtain an API token from ${DD_URL} (check the URL/credentials)" >&2
+              exit 1 ;;
+          esac
+
+          kubectl -n "${NS}" create secret generic "${SECRET}" --from-literal="${KEY}=${TOKEN}"
+          echo "==> created token Secret ${NS}/${SECRET}"
+
+  - name: run
+    description: Mint the DefectDojo token if needed, then trigger an on-demand scan + upload and follow it
+    inputs:
+      namespace:
+        description: Namespace where Greenbone is deployed
+        default: greenbone
+      cronjob:
+        description: Name of the DefectDojo upload CronJob
+        default: greenbone-community-defectdojo
+    actions:
+      - description: Ensure the DefectDojo token Secret exists
+        task: bootstrap-token
+        with:
+          namespace: ${{ .inputs.namespace }}
+      - description: Create a one-off Job from the CronJob and stream its logs to completion
+        cmd: |
+          NS="${{ .inputs.namespace }}"
+          CJ="${{ .inputs.cronjob }}"
+          JOB="${CJ}-manual-$(date +%s)"
+          kubectl create job --from="cronjob/${CJ}" "${JOB}" -n "${NS}"
+          echo "created job ${JOB} (namespace ${NS})"
+          echo "waiting for pod to start..."
+          kubectl wait --for=condition=Ready pod -l job-name="${JOB}" -n "${NS}" --timeout=180s || true
+          kubectl logs -f "job/${JOB}" -n "${NS}" || true
+          # Surface the real outcome as this task's exit status.
+          kubectl wait --for=condition=complete "job/${JOB}" -n "${NS}" --timeout=5400s
+
+  - name: logs
+    description: Show logs from the most recent DefectDojo upload Job
+    inputs:
+      namespace:
+        description: Namespace where Greenbone is deployed
+        default: greenbone
+    actions:
+      - cmd: |
+          NS="${{ .inputs.namespace }}"
+          POD="$(kubectl get pods -n "${NS}" \
+            -l app.kubernetes.io/component=defectdojo-upload \
+            --sort-by=.metadata.creationTimestamp \
+            -o jsonpath='{.items[-1:].metadata.name}')"
+          if [ -z "${POD}" ]; then echo "no defectdojo-upload pods found in ${NS}"; exit 1; fi
+          echo "==> logs for ${POD}"
+          kubectl logs "${POD}" -n "${NS}"

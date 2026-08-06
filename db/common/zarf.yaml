@@ -1,0 +1,13 @@
+kind: ZarfPackageConfig
+components:
+  - name: greenbone-db
+    required: true
+    description: Deploy the Greenbone Community Edition PostgreSQL database
+    charts:
+      - name: greenbone-db
+        releaseName: greenbone-db
+        localPath: ../charts/greenbone-db
+        version: 0.1.0
+        namespace: greenbone
+        valuesFiles:
+          - ../values/upstream-values.yaml
